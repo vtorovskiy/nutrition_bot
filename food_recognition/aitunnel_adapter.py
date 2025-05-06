@@ -1,6 +1,7 @@
 import sys
 import os
 from typing import Dict, Any, List, Optional
+from food_recognition.barcode_scanner import BarcodeScanner
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,19 +16,32 @@ class AITunnelNutritionAdapter:
     
     def __init__(self):
         self.aitunnel_vision = AITunnelVisionFoodRecognition()
+        self.barcode_scanner = BarcodeScanner()  # Добавляем сканер штрихкодов
     
     def process_image(self, image_path: Optional[str] = None, image_content: Optional[bytes] = None) -> Dict[str, Any]:
         """
-        Обработка изображения через AITunnel Vision API и подготовка данных о пищевой ценности
+        Обработка изображения для распознавания пищи или штрихкода
         
         Args:
             image_path (str, optional): Путь к файлу изображения
             image_content (bytes, optional): Содержимое изображения в байтах
-            
+                
         Returns:
             dict: Данные о пищевой ценности в стандартном формате
         """
-        # Получаем данные от AITunnel Vision
+        # Сначала пробуем распознать штрихкод
+        barcode = self.barcode_scanner.detect_barcode(image_path, image_content)
+        
+        if barcode:
+            # Если штрихкод найден, получаем информацию о продукте
+            product_info = self.barcode_scanner.get_product_info(barcode)
+            if product_info:
+                # Добавляем флаг, что это штрихкод
+                product_info['is_barcode'] = True
+                return product_info
+            
+        # Если штрихкод не найден или не удалось получить информацию,
+        # продолжаем с обычным распознаванием изображения
         food_items = self.aitunnel_vision.detect_food(image_path, image_content)
         
         if not food_items:

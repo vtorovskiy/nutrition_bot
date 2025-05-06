@@ -1,0 +1,22 @@
+{
+  "8851613101385": {
+    "name": "Coconut Milk",
+    "calories": 185,
+    "proteins": 1.6,
+    "fats": 19,
+    "carbs": 2,
+    "portion_weight": 100,
+    "barcode": "8851613101385",
+    "estimated": false
+  },
+  "4605561007152": {
+    "name": "Крабовые палочки",
+    "calories": 0,
+    "proteins": 0,
+    "fats": 0,
+    "carbs": 0,
+    "portion_weight": 100,
+    "barcode": "4605561007152",
+    "estimated": false
+  }
+}

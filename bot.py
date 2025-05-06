@@ -52,6 +52,9 @@ class BotStates(StatesGroup):
     waiting_for_height = State()
     waiting_for_activity = State()
     waiting_for_goal = State()
+    waiting_for_product_name = State()  # Ожидание ввода названия продукта по штрихкоду
+    waiting_for_product_calories = State()  # Ожидание ввода калорий
+    waiting_for_product_pfc = State()  # Ожидание ввода БЖУ
 
 # Временное хранилище данных пользователей
 user_data = {}
@@ -76,8 +79,8 @@ def start(message):
     # Приветственное сообщение
     welcome_text = (
         f"👋 Привет, {first_name or username or 'дорогой пользователь'}!\n\n"
-        f"Я твой помощник для анализа пищевой ценности блюд по фотографии. "
-        f"Просто отправь мне фото еды, и я рассчитаю её КБЖУ "
+        f"Я твой помощник для анализа пищевой ценности блюд по фотографии или штрихкоду. "
+        f"Просто отправь мне фото еды или штрихкод продукта, и я рассчитаю её КБЖУ "
         f"(калории, белки, жиры, углеводы).\n\n"
         f"🔍 *Доступные команды:*\n"
         f"/help - Показать справку\n"
@@ -516,23 +519,24 @@ def process_manual_norms(message):
 def help_command(message):
     """Обработчик команды /help"""
     help_text = (
-        "📱 *FoodNutritionBot - Помощь*\n\n"
+        "📱 *SnapEat - Помощь*\n\n"
         "Этот бот поможет вам рассчитать КБЖУ (калории, белки, жиры, углеводы) "
-        "блюд по фотографии.\n\n"
+        "блюд по фотографии или штрихкоду продукта.\n\n"
         "🔍 *Как использовать:*\n"
-        "1. Отправьте фотографию блюда боту\n"
+        "1. Отправьте фотографию блюда или штрихкод боту\n"
         "2. Дождитесь анализа (обычно занимает несколько секунд)\n"
         "3. Получите детальную информацию о пищевой ценности\n\n"
         "📋 *Команды:*\n"
         "/start - Начать использование бота\n"
         "/help - Показать это сообщение\n"
         "/subscription - Управление подпиской\n"
+        "/status - Ваш профиль\n"
         "/stats - Ваша статистика использования\n\n"
         "💳 *Подписка:*\n"
         f"- Бесплатно: {FREE_REQUESTS_LIMIT} анализов\n"
         f"- Подписка: {SUBSCRIPTION_COST} руб/месяц - неограниченное количество анализов\n\n"
         "❓ *Вопросы и поддержка:*\n"
-        "Если у вас возникли вопросы или проблемы, свяжитесь с @admin_contact_here"
+        "Если у вас возникли вопросы или проблемы, свяжитесь с нашей службой поддержки"
     )
     
     bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
@@ -861,6 +865,188 @@ def callback_handler(call):
             reply_markup=None
         )
 
+# Добавить обработчик для кнопки ручного ввода
+@bot.callback_query_handler(func=lambda call: call.data == "manual_input")
+def manual_input_callback(call):
+    """Обработчик кнопки ручного ввода данных о продукте"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Сохраняем штрихкод из сообщения
+    barcode_text = call.message.text
+    barcode = None
+    for line in barcode_text.split('\n'):
+        if 'Штрихкод:' in line:
+            barcode = line.replace('Штрихкод:', '').replace('*', '').strip()
+            break
+    
+    if not barcode and user_id in user_data:
+        barcode = user_data[user_id].get('barcode')
+    
+    # Сохраняем данные для последующего использования
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    
+    user_data[user_id]['barcode'] = barcode
+    user_data[user_id]['message_id'] = call.message.message_id
+    
+    # Запрашиваем название продукта
+    bot.edit_message_text(
+        "Введите название продукта:",
+        chat_id,
+        call.message.message_id
+    )
+    
+    # Устанавливаем состояние ожидания ввода названия продукта
+    bot.set_state(user_id, BotStates.waiting_for_product_name, chat_id)
+
+# Обработчик ввода названия продукта
+@bot.message_handler(state=BotStates.waiting_for_product_name)
+def process_product_name(message):
+    """Обработчик ввода названия продукта"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    product_name = message.text.strip()
+    
+    # Сохраняем название продукта
+    if user_id not in user_data:
+        user_data[user_id] = {}
+        
+    user_data[user_id]['name'] = product_name
+    
+    # Запрашиваем калории
+    sent_message = bot.send_message(
+        chat_id,
+        f"Название продукта: *{product_name}*\n\n"
+        "Введите количество калорий (ккал):",
+        parse_mode="Markdown"
+    )
+    
+    # Устанавливаем состояние ожидания ввода калорий
+    bot.set_state(user_id, BotStates.waiting_for_product_calories, chat_id)
+
+# Обработчик ввода калорий
+@bot.message_handler(state=BotStates.waiting_for_product_calories)
+def process_product_calories(message):
+    """Обработчик ввода калорий продукта"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    calories_text = message.text.strip()
+    
+    # Проверяем корректность ввода
+    try:
+        calories = float(calories_text.replace(',', '.'))
+    except ValueError:
+        bot.send_message(chat_id, "Пожалуйста, введите число. Попробуйте еще раз:")
+        return
+    
+    # Сохраняем калории
+    user_data[user_id]['calories'] = calories
+    
+    # Запрашиваем БЖУ
+    sent_message = bot.send_message(
+        chat_id,
+        f"Калории: *{calories}* ккал\n\n"
+        "Введите БЖУ в формате 'Белки Жиры Углеводы' (числа через пробел):",
+        parse_mode="Markdown"
+    )
+    
+    # Устанавливаем состояние ожидания ввода БЖУ
+    bot.set_state(user_id, BotStates.waiting_for_product_pfc, chat_id)
+
+# Обработчик ввода БЖУ
+@bot.message_handler(state=BotStates.waiting_for_product_pfc)
+def process_product_pfc(message):
+    """Обработчик ввода БЖУ продукта"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    pfc_text = message.text.strip()
+    
+    # Разбираем введенные значения
+    try:
+        values = pfc_text.split()
+        if len(values) != 3:
+            raise ValueError()
+        
+        proteins = float(values[0].replace(',', '.'))
+        fats = float(values[1].replace(',', '.'))
+        carbs = float(values[2].replace(',', '.'))
+    except:
+        bot.send_message(
+            chat_id,
+            "Пожалуйста, введите три числа через пробел (например: 10 5 20). Попробуйте еще раз:"
+        )
+        return
+    
+    # Сохраняем БЖУ
+    user_data[user_id]['proteins'] = proteins
+    user_data[user_id]['fats'] = fats
+    user_data[user_id]['carbs'] = carbs
+    
+    # Собираем все данные
+    product_data = {
+        'name': user_data[user_id]['name'],
+        'calories': user_data[user_id]['calories'],
+        'proteins': proteins,
+        'fats': fats,
+        'carbs': carbs,
+        'barcode': user_data[user_id]['barcode'],
+        'portion_weight': 100,  # По умолчанию на 100г
+        'estimated': False,
+        'is_barcode': True
+    }
+    
+    # Форматируем результат
+    result_text = format_nutrition_result(product_data, user_id)
+    
+    # Добавляем информацию о штрихкоде
+    result_text = f"🔍 Штрихкод: *{product_data['barcode']}*\n" + result_text
+    
+    # Проверяем подписку
+    is_subscribed = DatabaseManager.check_subscription_status(user_id)
+    remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+    
+    if not is_subscribed:
+        result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
+    
+    # Создаем клавиатуру
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
+    
+    if not is_subscribed:
+        markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+    
+    # Отправляем результат
+    bot.send_message(
+        chat_id,
+        result_text,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+    
+    # Сохраняем продукт в локальную базу данных штрихкодов
+    barcode_scanner = BarcodeScanner()
+    barcode_scanner._save_to_local_database(product_data['barcode'], product_data)
+    
+    # Сохраняем в базу данных пользователя
+    analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+    DatabaseManager.save_food_analysis(
+        user_id,
+        product_data['name'],
+        product_data['calories'],
+        product_data['proteins'],
+        product_data['fats'],
+        product_data['carbs'],
+        None,  # Не сохраняем фото для штрихкодов
+        product_data.get('portion_weight', 100),
+        analysis_time
+    )
+    
+    # Очищаем состояние и данные пользователя
+    bot.delete_state(user_id, chat_id)
+    if user_id in user_data:
+        del user_data[user_id]
+
 
 # Обработчик текстовых сообщений в режиме уточнения блюда
 @bot.message_handler(state=BotStates.waiting_for_food_name)
@@ -1124,6 +1310,75 @@ def photo_handler(message):
         
         # Используем AITunnel для распознавания и расчета КБЖУ
         nutrition_data = aitunnel_adapter.process_image(image_path=photo_path)
+
+        # Проверка на штрихкод
+        if 'is_barcode' in nutrition_data:
+            # Это штрихкод, формируем специальное сообщение
+            if nutrition_data.get('estimated', True):
+                # Если продукт не найден в базах данных
+                result_text = (
+                    f"🔍 Штрихкод: *{nutrition_data.get('barcode')}*\n\n"
+                    f"Продукт не найден в базе данных. Пожалуйста, введите название продукта и его КБЖУ вручную."
+                )
+                
+                # Создаем клавиатуру для ручного ввода
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("Ввести данные вручную", callback_data="manual_input"))
+                
+                # Сохраняем штрихкод и ID сообщения для последующего редактирования
+                user_data[user_id] = {
+                    'barcode': nutrition_data.get('barcode'),
+                    'message_id': processing_message.message_id
+                }
+                
+                bot.edit_message_text(
+                    result_text,
+                    message.chat.id,
+                    processing_message.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+                return
+            else:
+                # Если продукт найден
+                result_text = format_nutrition_result(nutrition_data, user_id)
+                
+                # Добавляем информацию о штрихкоде к результату
+                result_text = f"🔍 Штрихкод: *{nutrition_data.get('barcode')}*\n" + result_text
+                
+                # Создаем клавиатуру для уточнения веса
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
+                
+                # Добавляем кнопку для подписки, если пользователь не подписан
+                if not is_subscribed:
+                    remaining_requests -= 1
+                    result_text += f"\n🔄 Осталось запросов: {remaining_requests}\n"
+                    markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+                
+                # Сохранение результатов анализа
+                analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+                DatabaseManager.save_food_analysis(
+                    user_id,
+                    nutrition_data['name'],
+                    nutrition_data['calories'],
+                    nutrition_data['proteins'],
+                    nutrition_data['fats'],
+                    nutrition_data['carbs'],
+                    None,  # Не сохраняем фото для штрихкодов
+                    nutrition_data.get('portion_weight', 100),
+                    analysis_time
+                )
+                
+                # Отправка результатов пользователю
+                bot.edit_message_text(
+                    result_text,
+                    message.chat.id,
+                    processing_message.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+                return
         
         # Проверка на случай отсутствия еды на фото
         if not nutrition_data or ('name' in nutrition_data and nutrition_data['name'] == 'Неизвестное блюдо') or ('no_food' in nutrition_data and nutrition_data['no_food']) or ('name' in nutrition_data and nutrition_data['name'] == 'Еда не обнаружена'):

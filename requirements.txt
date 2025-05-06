@@ -6,3 +6,4 @@ aiohttp==3.8.6
 yookassa==2.4.0
 Pillow==10.1.0
 requests==2.31.0
+pyzbar==0.1.9
