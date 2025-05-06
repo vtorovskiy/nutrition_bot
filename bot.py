@@ -984,15 +984,20 @@ def process_product_pfc(message):
     user_data[user_id]['fats'] = fats
     user_data[user_id]['carbs'] = carbs
     
-    # Собираем все данные
+    # Очистка штрихкода от лишних символов
+    barcode = user_data[user_id]['barcode']
+    # Удаляем все нецифровые символы
+    clean_barcode = ''.join(filter(str.isdigit, barcode))
+
+    # Собираем все данные с очищенным штрихкодом
     product_data = {
         'name': user_data[user_id]['name'],
         'calories': user_data[user_id]['calories'],
         'proteins': proteins,
         'fats': fats,
         'carbs': carbs,
-        'barcode': user_data[user_id]['barcode'],
-        'portion_weight': 100,  # По умолчанию на 100г
+        'barcode': clean_barcode,  # Используем очищенный штрихкод
+        'portion_weight': 100,
         'estimated': False,
         'is_barcode': True
     }

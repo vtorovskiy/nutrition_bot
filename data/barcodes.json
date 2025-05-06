@@ -19,15 +19,45 @@
     "barcode": "4605561007152",
     "estimated": false
   },
-  "🔍  4602441025671": {
+  "4602441025671": {
     "name": "Кола Черноголовка",
     "calories": 45.0,
     "proteins": 0.0,
     "fats": 0.0,
     "carbs": 10.0,
-    "barcode": "🔍  4602441025671",
+    "barcode": "4602441025671",
     "portion_weight": 100,
     "estimated": false,
     "is_barcode": true
+  },
+  "4810268030369": {
+    "name": "TEOS Йогурт Греческий 2%",
+    "calories": 47.7,
+    "proteins": 5.71,
+    "fats": 1.43,
+    "carbs": 3,
+    "portion_weight": 100,
+    "barcode": "4810268030369",
+    "estimated": false
+  },
+  "4600605029282": {
+    "name": "Сметана 10%",
+    "calories": 117,
+    "proteins": 2.8,
+    "fats": 10,
+    "carbs": 3.9,
+    "portion_weight": 100,
+    "barcode": "4600605029282",
+    "estimated": false
+  },
+  "4640121260493": {
+    "name": "Сыр лёгкий",
+    "calories": 259,
+    "proteins": 26.5,
+    "fats": 17,
+    "carbs": 0,
+    "portion_weight": 100,
+    "barcode": "4640121260493",
+    "estimated": false
   }
 }

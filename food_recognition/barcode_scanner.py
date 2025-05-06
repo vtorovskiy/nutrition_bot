@@ -196,6 +196,13 @@ class BarcodeScanner:
             barcode (str): Штрихкод продукта
             product_data (dict): Информация о продукте
         """
+        # Очистка штрихкода от лишних символов
+        clean_barcode = ''.join(filter(str.isdigit, barcode))
+        
+        # Также очищаем штрихкод внутри product_data
+        if 'barcode' in product_data:
+            product_data['barcode'] = clean_barcode
+        
         data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
         database_path = os.path.join(data_dir, 'barcodes.json')
         
@@ -212,8 +219,8 @@ class BarcodeScanner:
             except:
                 products = {}
         
-        # Добавляем новый продукт
-        products[barcode] = product_data
+        # Добавляем новый продукт, используя очищенный штрихкод как ключ
+        products[clean_barcode] = product_data
         
         # Сохраняем обновленные данные
         with open(database_path, 'w', encoding='utf-8') as f:
