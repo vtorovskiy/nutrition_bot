@@ -40,11 +40,42 @@ def determine_meal_type(time):
 
 class DatabaseManager:
     """Класс для управления базой данных"""
+
+    @staticmethod
+    def get_user_profile(telegram_id):
+        """
+        Получает профиль пользователя
+        
+        Args:
+            telegram_id (int): Telegram ID пользователя
+            
+        Returns:
+            dict: Данные профиля пользователя
+        """
+        session = Session()
+        try:
+            user = session.query(User).filter_by(telegram_id=telegram_id).first()
+            if not user:
+                return None
+            
+            return {
+                'gender': user.gender,
+                'age': user.age,
+                'weight': user.weight,
+                'height': user.height,
+                'activity_level': user.activity_level,
+                'daily_calories': user.daily_calories,
+                'daily_proteins': user.daily_proteins,
+                'daily_fats': user.daily_fats,
+                'daily_carbs': user.daily_carbs
+            }
+        finally:
+            session.close()
     
     @staticmethod
-    def calculate_daily_norms(gender, age, weight, height, activity_level):
+    def calculate_daily_norms(gender, age, weight, height, activity_level, goal='maintenance'):
         """
-        Рассчитывает рекомендуемые дневные нормы КБЖУ по формуле Миффлина-Сан Жеора
+        Рассчитывает рекомендуемые дневные нормы КБЖУ по формуле Миффлина-Сан Жеора с учетом цели
         
         Args:
             gender (str): Пол ('male' или 'female')
@@ -52,7 +83,8 @@ class DatabaseManager:
             weight (float): Вес в кг
             height (float): Рост в см
             activity_level (float): Уровень активности (1.2 - 1.9)
-            
+            goal (str): Цель ('weight_loss', 'maintenance', 'weight_gain')
+                
         Returns:
             dict: Рекомендуемые дневные нормы КБЖУ
         """
@@ -65,13 +97,36 @@ class DatabaseManager:
         # Расчет суточной потребности в калориях с учетом уровня активности
         daily_calories = bmr * activity_level
         
-        # Расчет макронутриентов (по стандартным соотношениям)
-        # Белки: 30% от общей калорийности
-        # Жиры: 30% от общей калорийности
-        # Углеводы: 40% от общей калорийности
-        daily_proteins = (daily_calories * 0.3) / 4  # 4 ккал/г белка
-        daily_fats = (daily_calories * 0.3) / 9      # 9 ккал/г жира
-        daily_carbs = (daily_calories * 0.4) / 4     # 4 ккал/г углеводов
+        # Применяем корректировку в зависимости от цели
+        if goal == 'weight_loss':
+            # Для похудения: дефицит 20%
+            daily_calories *= 0.8
+        elif goal == 'weight_gain':
+            # Для набора массы: профицит 15%
+            daily_calories *= 1.15
+        # Для поддержания веса оставляем без изменений
+        
+        # Расчет макронутриентов с учетом цели
+        if goal == 'weight_loss':
+            # Для похудения: больше белка, меньше жиров и углеводов
+            protein_ratio = 0.35  # 35% калорий из белка
+            fat_ratio = 0.30      # 30% калорий из жиров
+            carb_ratio = 0.35     # 35% калорий из углеводов
+        elif goal == 'weight_gain':
+            # Для набора массы: больше белка и углеводов
+            protein_ratio = 0.30  # 30% калорий из белка
+            fat_ratio = 0.25      # 25% калорий из жиров
+            carb_ratio = 0.45     # 45% калорий из углеводов
+        else:  # maintenance
+            # Для поддержания: стандартное соотношение
+            protein_ratio = 0.30  # 30% калорий из белка
+            fat_ratio = 0.30      # 30% калорий из жиров
+            carb_ratio = 0.40     # 40% калорий из углеводов
+        
+        # Расчет граммов макронутриентов
+        daily_proteins = (daily_calories * protein_ratio) / 4  # 4 ккал/г белка
+        daily_fats = (daily_calories * fat_ratio) / 9         # 9 ккал/г жира
+        daily_carbs = (daily_calories * carb_ratio) / 4       # 4 ккал/г углеводов
         
         # Округляем значения
         daily_calories = round(daily_calories, 1)
@@ -87,8 +142,9 @@ class DatabaseManager:
         }
 
     @staticmethod
-    def update_user_profile(telegram_id, gender=None, age=None, weight=None, height=None, activity_level=None, 
-                        daily_calories=None, daily_proteins=None, daily_fats=None, daily_carbs=None):
+    def update_user_profile(telegram_id, gender=None, age=None, weight=None, height=None, 
+                            activity_level=None, goal=None,
+                            daily_calories=None, daily_proteins=None, daily_fats=None, daily_carbs=None):
         """
         Обновляет профиль пользователя и, при необходимости, пересчитывает дневные нормы
         
@@ -99,11 +155,12 @@ class DatabaseManager:
             weight (float, optional): Вес в кг
             height (float, optional): Рост в см
             activity_level (float, optional): Уровень активности (1.2 - 1.9)
+            goal (str, optional): Цель ('weight_loss', 'maintenance', 'weight_gain')
             daily_calories (float, optional): Дневная норма калорий (если указана вручную)
             daily_proteins (float, optional): Дневная норма белков (если указана вручную)
             daily_fats (float, optional): Дневная норма жиров (если указана вручную)
             daily_carbs (float, optional): Дневная норма углеводов (если указана вручную)
-            
+                
         Returns:
             dict: Обновленные дневные нормы КБЖУ
         """
@@ -124,6 +181,8 @@ class DatabaseManager:
                 user.height = height
             if activity_level is not None:
                 user.activity_level = activity_level
+            if goal is not None:
+                user.goal = goal
                 
             # Если указаны нормы вручную, используем их
             if daily_calories is not None:
@@ -140,8 +199,10 @@ class DatabaseManager:
             if (user.gender and user.age and user.weight and user.height and user.activity_level and
                 daily_calories is None and daily_proteins is None and daily_fats is None and daily_carbs is None):
                 
+                goal_to_use = user.goal or 'maintenance'  # Если цель не указана, считаем для поддержания веса
+                
                 norms = DatabaseManager.calculate_daily_norms(
-                    user.gender, user.age, user.weight, user.height, user.activity_level
+                    user.gender, user.age, user.weight, user.height, user.activity_level, goal_to_use
                 )
                 
                 user.daily_calories = norms['daily_calories']

@@ -50,6 +50,7 @@ class BotStates(StatesGroup):
     waiting_for_weight = State()
     waiting_for_height = State()
     waiting_for_activity = State()
+    waiting_for_goal = State()
 
 # Временное хранилище данных пользователей
 user_data = {}
@@ -74,13 +75,14 @@ def start(message):
     # Приветственное сообщение
     welcome_text = (
         f"👋 Привет, {first_name or username or 'дорогой пользователь'}!\n\n"
-        f"Я бот для анализа пищевой ценности блюд по фотографии. "
+        f"Я твой помощник для анализа пищевой ценности блюд по фотографии. "
         f"Просто отправь мне фото еды, и я рассчитаю её КБЖУ "
         f"(калории, белки, жиры, углеводы).\n\n"
         f"🔍 *Доступные команды:*\n"
         f"/help - Показать справку\n"
         f"/subscription - Управление подпиской\n"
-        f"/stats - Ваша статистика использования\n\n"
+        f"/stats - Ваша статистика использования\n"
+        f"/setup - Настройка профиля и норм КБЖУ\n\n"
     )
     
     # Добавляем информацию о подписке
@@ -91,33 +93,76 @@ def start(message):
     welcome_text += subscription_info
     
     # Кнопки
-    markup = InlineKeyboardMarkup()
+    markup = InlineKeyboardMarkup(row_width=1)
     if not is_subscribed:
         markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
     
+    # Добавляем кнопку для расчета КБЖУ
+    markup.add(InlineKeyboardButton("Рассчитать норму КБЖУ", callback_data="setup_profile"))
+    
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
-#обработчик команды /setup
 @bot.message_handler(commands=['setup'])
 def setup_command(message):
     """Обработчик команды /setup для настройки профиля пользователя"""
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("Настроить профиль", callback_data="setup_profile"),
-        InlineKeyboardButton("Задать нормы вручную", callback_data="setup_manual_norms")
-    )
+    user_id = message.from_user.id
     
-    setup_text = (
-        "⚙️ *Настройка персонального профиля*\n\n"
-        "Для точного расчета ваших дневных норм КБЖУ я могу использовать ваши физические параметры.\n\n"
-        "Выберите способ настройки:\n"
-        "1. *Настроить профиль* - я помогу вам ввести пол, возраст, вес, рост и уровень активности, "
-        "а затем рассчитаю рекомендуемые нормы КБЖУ.\n"
-        "2. *Задать нормы вручную* - вы сможете сами указать желаемые дневные нормы калорий, белков, жиров и углеводов.\n\n"
-        "_Все данные хранятся только в нашей базе и используются исключительно для расчета норм._"
-    )
+    # Получаем текущий профиль пользователя
+    user_profile = DatabaseManager.get_user_profile(user_id)
     
-    bot.send_message(message.chat.id, setup_text, parse_mode="Markdown", reply_markup=markup)
+    if user_profile and (user_profile.get('gender') or user_profile.get('daily_calories')):
+        # Если профиль уже настроен, показываем текущие данные
+        profile_text = "⚙️ *Ваш профиль*\n\n"
+        
+        if user_profile.get('gender'):
+            profile_text += f"• Пол: {'Мужской' if user_profile['gender'] == 'male' else 'Женский'}\n"
+        if user_profile.get('age'):
+            profile_text += f"• Возраст: {user_profile['age']} лет\n"
+        if user_profile.get('weight'):
+            profile_text += f"• Вес: {user_profile['weight']} кг\n"
+        if user_profile.get('height'):
+            profile_text += f"• Рост: {user_profile['height']} см\n"
+        if user_profile.get('activity_level'):
+            profile_text += f"• Уровень активности: {user_profile['activity_level']}\n"
+        
+        profile_text += "\n*Ваши дневные нормы КБЖУ:*\n"
+        
+        if user_profile.get('daily_calories'):
+            profile_text += f"• Калории: {user_profile['daily_calories']} ккал\n"
+        if user_profile.get('daily_proteins'):
+            profile_text += f"• Белки: {user_profile['daily_proteins']} г\n"
+        if user_profile.get('daily_fats'):
+            profile_text += f"• Жиры: {user_profile['daily_fats']} г\n"
+        if user_profile.get('daily_carbs'):
+            profile_text += f"• Углеводы: {user_profile['daily_carbs']} г\n"
+        
+        # Кнопки для обновления профиля
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("Обновить данные", callback_data="setup_profile"),
+            InlineKeyboardButton("Задать нормы вручную", callback_data="setup_manual_norms")
+        )
+        
+        bot.send_message(message.chat.id, profile_text, parse_mode="Markdown", reply_markup=markup)
+    else:
+        # Если профиль не настроен, предлагаем настроить
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("Настроить профиль", callback_data="setup_profile"),
+            InlineKeyboardButton("Задать нормы вручную", callback_data="setup_manual_norms")
+        )
+        
+        setup_text = (
+            "⚙️ *Настройка персонального профиля*\n\n"
+            "Для точного расчета ваших дневных норм КБЖУ я могу использовать ваши физические параметры.\n\n"
+            "Выберите способ настройки:\n"
+            "1. *Настроить профиль* - я помогу вам ввести пол, возраст, вес, рост и уровень активности, "
+            "а затем рассчитаю рекомендуемые нормы КБЖУ.\n"
+            "2. *Задать нормы вручную* - вы сможете сами указать желаемые дневные нормы калорий, белков, жиров и углеводов.\n\n"
+            "_Все данные хранятся только в нашей базе и используются исключительно для расчета норм._"
+        )
+        
+        bot.send_message(message.chat.id, setup_text, parse_mode="Markdown", reply_markup=markup)
 
 # Добавьте обработчик для кнопок настройки профиля
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setup_"))
@@ -168,7 +213,6 @@ def setup_callback(call):
         # Устанавливаем состояние ожидания ввода норм
         bot.register_next_step_handler(sent_message, process_manual_norms)
 
-# Обработчики для шагов настройки профиля
 @bot.callback_query_handler(func=lambda call: call.data.startswith("gender_"))
 def gender_callback(call):
     """Обработчик выбора пола"""
@@ -182,9 +226,12 @@ def gender_callback(call):
     
     # Обновляем сообщение и запрашиваем возраст
     bot.edit_message_text(
-        f"Выбран пол: {'Мужской' if gender == 'male' else 'Женский'}\n\nТеперь введите ваш возраст (полных лет):",
+        f"*Настройка профиля*\n\n"
+        f"Пол: {'Мужской' if gender == 'male' else 'Женский'}\n\n"
+        f"Введите ваш возраст (полных лет):",
         chat_id,
-        call.message.message_id
+        call.message.message_id,
+        parse_mode="Markdown"
     )
     
     # Устанавливаем состояние ожидания ввода возраста
@@ -202,15 +249,25 @@ def process_age(message):
         age = int(age_text)
         if age < 12 or age > 100:
             raise ValueError("Возраст должен быть от 12 до 100 лет")
-    except ValueError:
-        bot.send_message(chat_id, "Пожалуйста, введите корректный возраст (число от 12 до 100):")
+    except ValueError as e:
+        bot.send_message(chat_id, f"⚠️ {str(e)}. Пожалуйста, введите корректный возраст (число от 12 до 100):")
         return
     
     # Сохраняем возраст пользователя
     user_data[user_id]['age'] = age
     
-    # Запрашиваем вес
-    bot.send_message(chat_id, f"Возраст: {age} лет\n\nТеперь введите ваш вес в килограммах:")
+    # Удаляем предыдущее сообщение (вопрос о возрасте)
+    bot.delete_message(chat_id, message.message_id-1)
+    
+    # Создаем новое сообщение с обновленной информацией
+    sent_message = bot.send_message(
+        chat_id,
+        f"*Настройка профиля*\n\n"
+        f"Пол: {'Мужской' if user_data[user_id]['gender'] == 'male' else 'Женский'}\n"
+        f"Возраст: {age} лет\n\n"
+        f"Введите ваш вес в килограммах:",
+        parse_mode="Markdown"
+    )
     
     # Устанавливаем состояние ожидания ввода веса
     bot.set_state(user_id, BotStates.waiting_for_weight, chat_id)
@@ -227,15 +284,26 @@ def process_weight(message):
         weight = float(weight_text.replace(',', '.'))
         if weight < 30 or weight > 300:
             raise ValueError("Вес должен быть от 30 до 300 кг")
-    except ValueError:
-        bot.send_message(chat_id, "Пожалуйста, введите корректный вес (число от 30 до 300):")
+    except ValueError as e:
+        bot.send_message(chat_id, f"⚠️ {str(e)}. Пожалуйста, введите корректный вес (число от 30 до 300):")
         return
     
     # Сохраняем вес пользователя
     user_data[user_id]['weight'] = weight
     
-    # Запрашиваем рост
-    bot.send_message(chat_id, f"Вес: {weight} кг\n\nТеперь введите ваш рост в сантиметрах:")
+    # Удаляем предыдущее сообщение (вопрос о весе)
+    bot.delete_message(chat_id, message.message_id-1)
+    
+    # Создаем новое сообщение с обновленной информацией
+    sent_message = bot.send_message(
+        chat_id,
+        f"*Настройка профиля*\n\n"
+        f"Пол: {'Мужской' if user_data[user_id]['gender'] == 'male' else 'Женский'}\n"
+        f"Возраст: {user_data[user_id]['age']} лет\n"
+        f"Вес: {weight} кг\n\n"
+        f"Введите ваш рост в сантиметрах:",
+        parse_mode="Markdown"
+    )
     
     # Устанавливаем состояние ожидания ввода роста
     bot.set_state(user_id, BotStates.waiting_for_height, chat_id)
@@ -294,20 +362,52 @@ def activity_callback(call):
     # Сохраняем уровень активности пользователя
     user_data[user_id]['activity_level'] = activity_level
     
-    # Явно сбрасываем все возможные состояния
-    bot.delete_state(user_id, chat_id)
+    # Запрашиваем цель
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("Похудение", callback_data="goal_weight_loss"),
+        InlineKeyboardButton("Поддержание веса", callback_data="goal_maintenance"),
+        InlineKeyboardButton("Набор массы", callback_data="goal_weight_gain")
+    )
+    
+    goal_text = (
+        f"Уровень активности: {activity_level}\n\n"
+        "Выберите вашу цель:\n\n"
+        "• *Похудение* - снижение веса, дефицит калорий\n"
+        "• *Поддержание веса* - сохранение текущего веса\n"
+        "• *Набор массы* - увеличение веса и мышечной массы"
+    )
+    
+    bot.edit_message_text(
+        goal_text,
+        chat_id,
+        call.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("goal_"))
+def goal_callback(call):
+    """Обработчик выбора цели"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    goal = call.data.split("_", 1)[1]  # 'weight_loss', 'maintenance' или 'weight_gain'
+    
+    # Сохраняем цель пользователя
+    user_data[user_id]['goal'] = goal
     
     # Получаем все данные пользователя
     user_profile = user_data[user_id]
     
-    # Обновляем профиль пользователя и рассчитываем дневные нормы
+    # Обновляем профиль пользователя и рассчитываем дневные нормы с учетом цели
     norms = DatabaseManager.update_user_profile(
         user_id,
         gender=user_profile['gender'],
         age=user_profile['age'],
         weight=user_profile['weight'],
         height=user_profile['height'],
-        activity_level=activity_level
+        activity_level=user_profile['activity_level'],
+        goal=user_profile['goal']
     )
     
     if norms:
@@ -318,7 +418,8 @@ def activity_callback(call):
             f"• Возраст: {user_profile['age']} лет\n"
             f"• Вес: {user_profile['weight']} кг\n"
             f"• Рост: {user_profile['height']} см\n"
-            f"• Уровень активности: {activity_level}\n\n"
+            f"• Уровень активности: {user_profile['activity_level']}\n"
+            f"• Цель: {'Похудение' if user_profile['goal'] == 'weight_loss' else 'Поддержание веса' if user_profile['goal'] == 'maintenance' else 'Набор массы'}\n\n"
             "*Рекомендуемые дневные нормы КБЖУ:*\n"
             f"• Калории: {norms['daily_calories']} ккал\n"
             f"• Белки: {norms['daily_proteins']} г\n"
@@ -987,7 +1088,7 @@ def photo_handler(message):
     # Проверка статуса подписки
     is_subscribed = DatabaseManager.check_subscription_status(user_id)
     remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
-    
+
     # Проверка доступности запросов
     if not is_subscribed and remaining_requests <= 0:
         markup = InlineKeyboardMarkup()

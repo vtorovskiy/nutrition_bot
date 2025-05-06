@@ -28,6 +28,7 @@ class User(Base):
     weight = Column(Float, nullable=True)  # в кг
     height = Column(Float, nullable=True)  # в см
     activity_level = Column(Float, nullable=True)  # коэффициент активности (1.2 - 1.9)
+    goal = Column(String, nullable=True)  # 'weight_loss', 'maintenance', 'weight_gain'
     
     # Расчетные нормы (могут быть заданы вручную или расчитаны)
     daily_calories = Column(Float, nullable=True)
