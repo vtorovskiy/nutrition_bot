@@ -18,5 +18,16 @@
     "portion_weight": 100,
     "barcode": "4605561007152",
     "estimated": false
+  },
+  "🔍  4602441025671": {
+    "name": "Кола Черноголовка",
+    "calories": 45.0,
+    "proteins": 0.0,
+    "fats": 0.0,
+    "carbs": 10.0,
+    "barcode": "🔍  4602441025671",
+    "portion_weight": 100,
+    "estimated": false,
+    "is_barcode": true
   }
 }

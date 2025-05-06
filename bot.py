@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, date
 from telebot.handler_backends import State, StatesGroup
 from utils.helpers import get_nutrition_indicators
 from database.models import User, FoodAnalysis, UserSubscription
+from food_recognition.barcode_scanner import BarcodeScanner
 
 # Настройка логирования
 logging.basicConfig(
@@ -764,6 +765,41 @@ def stats_navigation_callback(call):
     # Показываем статистику за выбранную дату
     show_stats_for_date(chat_id, user_id, user_stats_dates[user_id])
 
+# Добавить обработчик для кнопки ручного ввода
+@bot.callback_query_handler(func=lambda call: call.data == "manual_input")
+def manual_input_callback(call):
+    """Обработчик кнопки ручного ввода данных о продукте"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Сохраняем штрихкод из сообщения
+    barcode_text = call.message.text
+    barcode = None
+    for line in barcode_text.split('\n'):
+        if 'Штрихкод:' in line:
+            barcode = line.replace('Штрихкод:', '').replace('*', '').strip()
+            break
+    
+    if not barcode and user_id in user_data:
+        barcode = user_data[user_id].get('barcode')
+    
+    # Сохраняем данные для последующего использования
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    
+    user_data[user_id]['barcode'] = barcode
+    user_data[user_id]['message_id'] = call.message.message_id
+    
+    # Запрашиваем название продукта
+    bot.edit_message_text(
+        "Введите название продукта:",
+        chat_id,
+        call.message.message_id
+    )
+    
+    # Устанавливаем состояние ожидания ввода названия продукта
+    bot.set_state(user_id, BotStates.waiting_for_product_name, chat_id)
+
 # Обновляем обработчик callback-запросов
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -864,41 +900,6 @@ def callback_handler(call):
             call.message.message_id,
             reply_markup=None
         )
-
-# Добавить обработчик для кнопки ручного ввода
-@bot.callback_query_handler(func=lambda call: call.data == "manual_input")
-def manual_input_callback(call):
-    """Обработчик кнопки ручного ввода данных о продукте"""
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
-    
-    # Сохраняем штрихкод из сообщения
-    barcode_text = call.message.text
-    barcode = None
-    for line in barcode_text.split('\n'):
-        if 'Штрихкод:' in line:
-            barcode = line.replace('Штрихкод:', '').replace('*', '').strip()
-            break
-    
-    if not barcode and user_id in user_data:
-        barcode = user_data[user_id].get('barcode')
-    
-    # Сохраняем данные для последующего использования
-    if user_id not in user_data:
-        user_data[user_id] = {}
-    
-    user_data[user_id]['barcode'] = barcode
-    user_data[user_id]['message_id'] = call.message.message_id
-    
-    # Запрашиваем название продукта
-    bot.edit_message_text(
-        "Введите название продукта:",
-        chat_id,
-        call.message.message_id
-    )
-    
-    # Устанавливаем состояние ожидания ввода названия продукта
-    bot.set_state(user_id, BotStates.waiting_for_product_name, chat_id)
 
 # Обработчик ввода названия продукта
 @bot.message_handler(state=BotStates.waiting_for_product_name)
