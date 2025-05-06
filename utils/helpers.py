@@ -36,7 +36,7 @@ def download_photo(file_path):
 
 def format_nutrition_result(nutrition_data, user_id=None):
     """
-    Улучшенное форматирование результатов анализа пищевой ценности с прогресс-барами
+    Форматирование результатов анализа пищевой ценности в виде карточки
     
     Args:
         nutrition_data (dict): Данные о пищевой ценности
@@ -48,84 +48,37 @@ def format_nutrition_result(nutrition_data, user_id=None):
     if not nutrition_data:
         return "Не удалось определить пищевую ценность продукта."
     
-    # Текст о точности определения
-    if nutrition_data.get('estimated', False):
-        accuracy_text = "⚠️ _Приблизительная оценка_"
+    # Получаем информацию о блюде
+    dish_name = nutrition_data['name']
+    portion_weight = nutrition_data.get('portion_weight', 0)
+    calories = nutrition_data.get('calories', 0)
+    proteins = nutrition_data.get('proteins', 0)
+    fats = nutrition_data.get('fats', 0)
+    carbs = nutrition_data.get('carbs', 0)
+    
+    # Составляем карточку
+    text = f"━━━ 🍽️ *{dish_name}* ━━━\n"
+    
+    # Строка с весом и калориями
+    if portion_weight > 0:
+        text += f"⚖️ *{portion_weight}* г        📊 *{calories}* ккал\n"
     else:
-        accuracy_text = "✅ _Точное определение_"
+        text += f"📊 *{calories}* ккал\n"
     
-    # Основной текст с результатами
-    text = f"🍽 *{nutrition_data['name']}*\n{accuracy_text}\n\n"
+    # Строка с белками и жирами
+    text += f"🥩 Белки: *{proteins}* г   🧈 Жиры: *{fats}* г\n"
     
-    # Добавляем информацию о весе порции
-    portion_text = ""
-    if 'portion_weight' in nutrition_data and nutrition_data['portion_weight'] > 0:
-        portion_text = f"⚖️ Вес порции: *{nutrition_data['portion_weight']}* г\n"
-    text += portion_text
+    # Строка с углеводами
+    text += f"🍞 Углеводы: *{carbs}* г\n"
     
-    # Получаем дневные нормы пользователя, если указан ID
-    daily_norms = None
-    if user_id:
-        daily_norms = DatabaseManager.get_user_daily_norms(user_id)
+    # Добавляем ингредиенты, если они есть
+    detected_items = nutrition_data.get('detected_items', [])
+    if detected_items:
+        # Вместо нумерованного списка - просто через запятую
+        text += f"✓ {', '.join(detected_items)}\n"
     
-    # Если есть дневные нормы, добавляем прогресс-бары и индикаторы
-    if daily_norms:
-        indicators = get_nutrition_indicators(nutrition_data, daily_norms)
-        
-        if indicators and 'calories' in indicators:
-            text += f"{indicators['calories']['indicator']} Калории: *{nutrition_data['calories']}* ккал\n"
-            text += f"   {indicators['calories']['bar']} от дневной нормы\n"
-        else:
-            text += f"🔥 Калории: *{nutrition_data['calories']}* ккал\n"
-        
-        if indicators and 'proteins' in indicators:
-            text += f"{indicators['proteins']['indicator']} Белки: *{nutrition_data['proteins']}* г\n"
-            text += f"   {indicators['proteins']['bar']} от дневной нормы\n"
-        else:
-            text += f"🥩 Белки: *{nutrition_data['proteins']}* г\n"
-        
-        if indicators and 'fats' in indicators:
-            text += f"{indicators['fats']['indicator']} Жиры: *{nutrition_data['fats']}* г\n"
-            text += f"   {indicators['fats']['bar']} от дневной нормы\n"
-        else:
-            text += f"🧈 Жиры: *{nutrition_data['fats']}* г\n"
-        
-        if indicators and 'carbs' in indicators:
-            text += f"{indicators['carbs']['indicator']} Углеводы: *{nutrition_data['carbs']}* г\n"
-            text += f"   {indicators['carbs']['bar']} от дневной нормы\n"
-        else:
-            text += f"🍞 Углеводы: *{nutrition_data['carbs']}* г\n"
-    else:
-        # Если нет дневных норм, отображаем обычные значения
-        text += f"🔥 Калории: *{nutrition_data['calories']}* ккал\n"
-        text += f"🥩 Белки: *{nutrition_data['proteins']}* г\n"
-        text += f"🧈 Жиры: *{nutrition_data['fats']}* г\n"
-        text += f"🍞 Углеводы: *{nutrition_data['carbs']}* г\n"
-    
-    # Дополнительная информация о пользе/вреде (опционально)
-    nutritional_insights = []
-    
-    if nutrition_data['calories'] < 200:
-        nutritional_insights.append("🟢 *Низкокалорийное блюдо* - подходит для снижения веса")
-    elif nutrition_data['calories'] > 600:
-        nutritional_insights.append("🟠 *Высококалорийное блюдо* - употребляйте с осторожностью при диете")
-    
-    if nutrition_data['proteins'] > 25:
-        nutritional_insights.append("💪 *Высокое содержание белка* - хороший выбор для роста мышц")
-    
-    if nutrition_data['fats'] > 30:
-        nutritional_insights.append("⚠️ *Высокое содержание жиров* - следите за дневной нормой")
-    
-    if nutrition_data['carbs'] > 60:
-        nutritional_insights.append("🍚 *Высокое содержание углеводов* - хороший источник энергии")
-    
-    # Добавляем инсайты, если они есть
-    if nutritional_insights:
-        text += "\n" + "\n".join(nutritional_insights)
-    
-    # Если нет дневных норм, добавляем приглашение настроить профиль
-    if not daily_norms and user_id:
-        text += "\n\n💡 _Используйте команду /setup для настройки персональных норм КБЖУ и отслеживания прогресса._"
+    # Нижняя разделительная линия
+    text += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     
     return text
 
@@ -144,7 +97,7 @@ def get_subscription_info(remaining_requests, is_subscribed):
         return "✅ У вас активная подписка. Вы можете делать неограниченное количество запросов."
     else:
         if remaining_requests > 0:
-            return f"ℹ️ У вас осталось {remaining_requests} бесплатных запросов. Для неограниченного доступа оформите подписку."
+            return f"ℹ️ Для неограниченного доступа оформите подписку."
         else:
             return "❗ У вас закончились бесплатные запросы. Для продолжения работы оформите подписку."
 

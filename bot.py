@@ -1037,6 +1037,15 @@ def photo_handler(message):
     # Проверка статуса подписки
     is_subscribed = DatabaseManager.check_subscription_status(user_id)
     remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+
+    # Добавление информации о подписке
+    if not is_subscribed:
+        remaining_requests -= 1
+        # Добавляем информацию о запросах
+        result_text += f"\n⏳ Осталось {remaining_requests} запросов"
+        result_text += f"\nℹ️ Для неограниченного доступа оформите подписку."
+    else:
+        result_text += "\n✅ Активная подписка"
     
     # Проверка доступности запросов
     if not is_subscribed and remaining_requests <= 0:
