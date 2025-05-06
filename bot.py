@@ -11,7 +11,6 @@ from food_recognition.aitunnel_adapter import AITunnelNutritionAdapter
 from database.db_manager import DatabaseManager, Session
 from database.models import User, FoodAnalysis
 from datetime import datetime, timedelta, date
-from telebot.handler_backends import State, StatesGroup
 from utils.helpers import get_nutrition_indicators
 from database.models import User, FoodAnalysis, UserSubscription
 from food_recognition.barcode_scanner import BarcodeScanner
@@ -169,7 +168,7 @@ def setup_command(message):
         
         bot.send_message(message.chat.id, setup_text, parse_mode="Markdown", reply_markup=markup)
 
-# Добавьте обработчик для кнопок настройки профиля
+# Обработчик для кнопок настройки профиля
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setup_"))
 def setup_callback(call):
     """Обработчик кнопок настройки профиля"""
@@ -262,7 +261,10 @@ def process_age(message):
     user_data[user_id]['age'] = age
     
     # Удаляем предыдущее сообщение (вопрос о возрасте)
-    bot.delete_message(chat_id, message.message_id-1)
+    try:
+        bot.delete_message(chat_id, message.message_id-1)
+    except Exception as e:
+        logger.error(f"Ошибка при удалении сообщения: {str(e)}")
     
     # Создаем новое сообщение с обновленной информацией
     sent_message = bot.send_message(
@@ -297,7 +299,10 @@ def process_weight(message):
     user_data[user_id]['weight'] = weight
     
     # Удаляем предыдущее сообщение (вопрос о весе)
-    bot.delete_message(chat_id, message.message_id-1)
+    try:
+        bot.delete_message(chat_id, message.message_id-1)
+    except Exception as e:
+        logger.error(f"Ошибка при удалении сообщения: {str(e)}")
     
     # Создаем новое сообщение с обновленной информацией
     sent_message = bot.send_message(
@@ -325,8 +330,8 @@ def process_height(message):
         height = float(height_text.replace(',', '.'))
         if height < 100 or height > 250:
             raise ValueError("Рост должен быть от 100 до 250 см")
-    except ValueError:
-        bot.send_message(chat_id, "Пожалуйста, введите корректный рост (число от 100 до 250):")
+    except ValueError as e:
+        bot.send_message(chat_id, f"⚠️ {str(e)}. Пожалуйста, введите корректный рост (число от 100 до 250):")
         return
     
     # Сохраняем рост пользователя
@@ -531,8 +536,8 @@ def help_command(message):
         "/start - Начать использование бота\n"
         "/help - Показать это сообщение\n"
         "/subscription - Управление подпиской\n"
-        "/status - Ваш профиль\n"
-        "/stats - Ваша статистика использования\n\n"
+        "/stats - Ваша статистика использования\n"
+        "/setup - Настройка профиля и норм КБЖУ\n\n"
         "💳 *Подписка:*\n"
         f"- Бесплатно: {FREE_REQUESTS_LIMIT} анализов\n"
         f"- Подписка: {SUBSCRIPTION_COST} руб/месяц - неограниченное количество анализов\n\n"
@@ -616,7 +621,12 @@ def show_stats_for_date(chat_id, user_id, selected_date):
         selected_date (datetime.date): Выбранная дата для отображения статистики
     """
     # Получение статистики за выбранную дату
-    daily_stats = DatabaseManager.get_nutrition_stats_for_date(user_id, selected_date)
+    try:
+        daily_stats = DatabaseManager.get_nutrition_stats_for_date(user_id, selected_date)
+    except Exception as e:
+        logger.error(f"Ошибка при получении статистики: {str(e)}")
+        bot.send_message(chat_id, "Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.")
+        return
 
     # Форматируем дату для отображения
     date_str = selected_date.strftime("%d.%m.%Y")
@@ -760,12 +770,15 @@ def stats_navigation_callback(call):
         user_stats_dates[user_id] = datetime.strptime(date_str, "%Y-%m-%d").date()
     
     # Удаляем оригинальное сообщение для избежания спама
-    bot.delete_message(chat_id, call.message.message_id)
+    try:
+        bot.delete_message(chat_id, call.message.message_id)
+    except Exception as e:
+        logger.error(f"Ошибка при удалении сообщения: {str(e)}")
     
     # Показываем статистику за выбранную дату
     show_stats_for_date(chat_id, user_id, user_stats_dates[user_id])
 
-# Добавить обработчик для кнопки ручного ввода
+# Обработчик для кнопки ручного ввода
 @bot.callback_query_handler(func=lambda call: call.data == "manual_input")
 def manual_input_callback(call):
     """Обработчик кнопки ручного ввода данных о продукте"""
@@ -800,11 +813,57 @@ def manual_input_callback(call):
     # Устанавливаем состояние ожидания ввода названия продукта
     bot.set_state(user_id, BotStates.waiting_for_product_name, chat_id)
 
-# Обновляем обработчик callback-запросов
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    """Обработчик callback-запросов"""
+@bot.callback_query_handler(func=lambda call: call.data == "specify_food")
+def specify_food_callback(call):
+    """Обработчик кнопки уточнения блюда"""
     user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Сохраняем ID сообщения для обновления
+    user_data[user_id] = {
+        'message_id': call.message.message_id,
+        'last_photo_id': None  # Здесь будет ID последней фотографии
+    }
+    
+    # Устанавливаем состояние ожидания названия блюда
+    bot.set_state(user_id, BotStates.waiting_for_food_name, chat_id)
+    
+    # Запрашиваем уточнение
+    bot.edit_message_text(
+        "Пожалуйста, введите точное название блюда для более точного расчета КБЖУ:",
+        chat_id,
+        call.message.message_id,
+        reply_markup=None
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "specify_portion")
+def specify_portion_callback(call):
+    """Обработчик кнопки указания размера порции"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Сохраняем ID сообщения для обновления
+    user_data[user_id] = {
+        'message_id': call.message.message_id,
+        'last_photo_id': None
+    }
+    
+    # Устанавливаем состояние ожидания ввода размера порции
+    bot.set_state(user_id, BotStates.waiting_for_portion_size, chat_id)
+    
+    # Запрашиваем уточнение
+    bot.edit_message_text(
+        "Пожалуйста, введите примерный вес порции в граммах (только число):",
+        chat_id,
+        call.message.message_id,
+        reply_markup=None
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("subscribe"))
+def subscription_callback(call):
+    """Обработчик кнопок подписки"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
     
     if call.data == "subscribe":
         # Выбор периода подписки
@@ -816,7 +875,7 @@ def callback_handler(call):
         
         bot.edit_message_text(
             "Выберите период подписки:",
-            call.message.chat.id,
+            chat_id,
             call.message.message_id,
             reply_markup=markup
         )
@@ -838,68 +897,36 @@ def callback_handler(call):
         amount = SUBSCRIPTION_COST * months * (1 - discount)
         description = f"Подписка на бота для анализа КБЖУ на {months} мес."
         
-        # Создание платежа в ЮKassa
-        payment_data = YuKassaPayment.create_payment(user_id, months, description)
-        
-        if payment_data and payment_data.get('confirmation_url'):
-            # Формирование сообщения
-            payment_text = (
-                f"💳 *Оплата подписки*\n\n"
-                f"Период: {months} мес.\n"
-                f"Стоимость: {payment_data['amount']} {payment_data['currency']}\n\n"
-                "Для оплаты перейдите по ссылке ниже:"
-            )
+        try:
+            # Создание платежа в ЮKassa
+            payment_data = YuKassaPayment.create_payment(user_id, months, description)
             
-            # Кнопка для оплаты
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("Оплатить", url=payment_data['confirmation_url']))
-            
-            bot.edit_message_text(
-                payment_text,
-                call.message.chat.id,
-                call.message.message_id,
-                parse_mode="Markdown",
-                reply_markup=markup
-            )
-        else:
+            if payment_data and payment_data.get('confirmation_url'):
+                # Формирование сообщения
+                payment_text = (
+                    f"💳 *Оплата подписки*\n\n"
+                    f"Период: {months} мес.\n"
+                    f"Стоимость: {payment_data['amount']} {payment_data['currency']}\n\n"
+                    "Для оплаты перейдите по ссылке ниже:"
+                )
+                
+                # Кнопка для оплаты
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("Оплатить", url=payment_data['confirmation_url']))
+                
+                bot.edit_message_text(
+                    payment_text,
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+            else:
+                bot.answer_callback_query(call.id, "Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
+        except Exception as e:
+            logger.error(f"Ошибка при создании платежа: {str(e)}")
             bot.answer_callback_query(call.id, "Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
-    
-    elif call.data == "specify_food":
-        # Переход в режим ожидания названия блюда
-        # Сохраняем ID сообщения для обновления
-        user_data[user_id] = {
-            'message_id': call.message.message_id,
-            'last_photo_id': None  # Здесь будет ID последней фотографии
-        }
-        
-        # Устанавливаем состояние ожидания названия блюда
-        bot.set_state(user_id, BotStates.waiting_for_food_name, call.message.chat.id)
-        
-        # Запрашиваем уточнение
-        bot.edit_message_text(
-            "Пожалуйста, введите точное название блюда для более точного расчета КБЖУ:",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=None
-        )
-
-    elif call.data == "specify_portion":
-        # Сохраняем ID сообщения для обновления
-        user_data[user_id] = {
-            'message_id': call.message.message_id,
-            'last_photo_id': None
-        }
-        
-        # Устанавливаем состояние ожидания ввода размера порции
-        bot.set_state(user_id, BotStates.waiting_for_portion_size, call.message.chat.id)
-        
-        # Запрашиваем уточнение
-        bot.edit_message_text(
-            "Пожалуйста, введите примерный вес порции в граммах (только число):",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=None
-        )
+            bot.send_message(chat_id, "Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.")
 
 # Обработчик ввода названия продукта
 @bot.message_handler(state=BotStates.waiting_for_product_name)
@@ -1002,57 +1029,60 @@ def process_product_pfc(message):
         'is_barcode': True
     }
     
-    # Форматируем результат
-    result_text = format_nutrition_result(product_data, user_id)
-    
-    # Добавляем информацию о штрихкоде
-    result_text = f"🔍 Штрихкод: *{product_data['barcode']}*\n" + result_text
-    
-    # Проверяем подписку
-    is_subscribed = DatabaseManager.check_subscription_status(user_id)
-    remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
-    
-    if not is_subscribed:
-        result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
-    
-    # Создаем клавиатуру
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
-    
-    if not is_subscribed:
-        markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
-    
-    # Отправляем результат
-    bot.send_message(
-        chat_id,
-        result_text,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    
-    # Сохраняем продукт в локальную базу данных штрихкодов
-    barcode_scanner = BarcodeScanner()
-    barcode_scanner._save_to_local_database(product_data['barcode'], product_data)
-    
-    # Сохраняем в базу данных пользователя
-    analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
-    DatabaseManager.save_food_analysis(
-        user_id,
-        product_data['name'],
-        product_data['calories'],
-        product_data['proteins'],
-        product_data['fats'],
-        product_data['carbs'],
-        None,  # Не сохраняем фото для штрихкодов
-        product_data.get('portion_weight', 100),
-        analysis_time
-    )
-    
-    # Очищаем состояние и данные пользователя
-    bot.delete_state(user_id, chat_id)
-    if user_id in user_data:
-        del user_data[user_id]
-
+    try:
+        # Форматируем результат
+        result_text = format_nutrition_result(product_data, user_id)
+        
+        # Добавляем информацию о штрихкоде
+        result_text = f"🔍 Штрихкод: *{product_data['barcode']}*\n" + result_text
+        
+        # Проверяем подписку
+        is_subscribed = DatabaseManager.check_subscription_status(user_id)
+        remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+        
+        if not is_subscribed:
+            result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
+        
+        # Создаем клавиатуру
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
+        
+        if not is_subscribed:
+            markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+        
+        # Отправляем результат
+        bot.send_message(
+            chat_id,
+            result_text,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+        
+        # Сохраняем продукт в локальную базу данных штрихкодов
+        barcode_scanner = BarcodeScanner()
+        barcode_scanner._save_to_local_database(product_data['barcode'], product_data)
+        
+        # Сохраняем в базу данных пользователя
+        analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+        DatabaseManager.save_food_analysis(
+            user_id,
+            product_data['name'],
+            product_data['calories'],
+            product_data['proteins'],
+            product_data['fats'],
+            product_data['carbs'],
+            None,  # Не сохраняем фото для штрихкодов
+            product_data.get('portion_weight', 100),
+            analysis_time
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при обработке данных продукта: {str(e)}")
+        bot.send_message(chat_id, "Произошла ошибка при обработке данных. Пожалуйста, попробуйте позже.")
+    finally:
+        # Очищаем состояние и данные пользователя
+        bot.delete_state(user_id, chat_id)
+        if user_id in user_data:
+            del user_data[user_id]
 
 # Обработчик текстовых сообщений в режиме уточнения блюда
 @bot.message_handler(state=BotStates.waiting_for_food_name)
@@ -1095,24 +1125,28 @@ def handle_food_name(message):
                 result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
             
             # Обновляем информацию в базе данных
-            # Получаем последнюю запись пользователя
-            session = DatabaseManager.Session()
             try:
-                user = session.query(User).filter_by(telegram_id=user_id).first()
-                if user:
-                    food_analysis = session.query(FoodAnalysis).filter_by(
-                        user_id=user.id
-                    ).order_by(FoodAnalysis.analysis_date.desc()).first()
-                    
-                    if food_analysis:
-                        food_analysis.food_name = food_name
-                        food_analysis.calories = nutrition_data['calories']
-                        food_analysis.proteins = nutrition_data['proteins']
-                        food_analysis.fats = nutrition_data['fats']
-                        food_analysis.carbs = nutrition_data['carbs']
-                        session.commit()
-            finally:
-                session.close()
+                # Получаем последнюю запись пользователя
+                session = DatabaseManager.Session()
+                try:
+                    user = session.query(User).filter_by(telegram_id=user_id).first()
+                    if user:
+                        food_analysis = session.query(FoodAnalysis).filter_by(
+                            user_id=user.id
+                        ).order_by(FoodAnalysis.analysis_date.desc()).first()
+                        
+                        if food_analysis:
+                            food_analysis.food_name = food_name
+                            food_analysis.calories = nutrition_data['calories']
+                            food_analysis.proteins = nutrition_data['proteins']
+                            food_analysis.fats = nutrition_data['fats']
+                            food_analysis.carbs = nutrition_data['carbs']
+                            session.commit()
+                finally:
+                    session.close()
+            except Exception as db_error:
+                logger.error(f"Ошибка при обновлении БД: {str(db_error)}")
+                # Продолжаем выполнение, так как это некритичная ошибка
             
             # Кнопки
             markup = None
@@ -1149,7 +1183,7 @@ def handle_food_name(message):
     if user_id in user_data:
         del user_data[user_id]
 
-# Добавьте новый обработчик для ввода размера порции
+# Обработчик для ввода размера порции
 @bot.message_handler(state=BotStates.waiting_for_portion_size)
 def handle_portion_size(message):
     """Обработчик ввода размера порции пользователем с улучшенной обработкой ошибок"""
@@ -1273,15 +1307,19 @@ def handle_portion_size(message):
     if user_id in user_data:
         del user_data[user_id]
 
-# Обработчик фотографий
 @bot.message_handler(content_types=['photo'])
 def photo_handler(message):
     """Обработчик фотографий с использованием AITunnel для точного определения продуктов"""
     user_id = message.from_user.id
     
     # Проверка статуса подписки
-    is_subscribed = DatabaseManager.check_subscription_status(user_id)
-    remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+    try:
+        is_subscribed = DatabaseManager.check_subscription_status(user_id)
+        remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+    except Exception as e:
+        logger.error(f"Ошибка при проверке подписки: {str(e)}")
+        bot.reply_to(message, "Произошла ошибка при проверке вашей подписки. Пожалуйста, попробуйте позже.")
+        return
 
     # Проверка доступности запросов
     if not is_subscribed and remaining_requests <= 0:
@@ -1298,6 +1336,7 @@ def photo_handler(message):
     # Отправка сообщения о начале обработки
     processing_message = bot.reply_to(message, "🔍 Анализирую фотографию... Это может занять до 15 секунд, пожалуйста, подождите.")
     
+    photo_path = None
     try:
         # Получение информации о фото
         file_info = bot.get_file(message.photo[-1].file_id)
@@ -1316,6 +1355,15 @@ def photo_handler(message):
         
         # Используем AITunnel для распознавания и расчета КБЖУ
         nutrition_data = aitunnel_adapter.process_image(image_path=photo_path)
+        
+        if nutrition_data is None:
+            # Обработка случая, когда API вернул None
+            bot.edit_message_text(
+                "❌ Не удалось распознать изображение. Пожалуйста, попробуйте отправить более четкое фото с хорошим освещением.",
+                message.chat.id,
+                processing_message.message_id
+            )
+            return
 
         # Проверка на штрихкод
         if 'is_barcode' in nutrition_data:
@@ -1363,18 +1411,22 @@ def photo_handler(message):
                     markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
                 
                 # Сохранение результатов анализа
-                analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
-                DatabaseManager.save_food_analysis(
-                    user_id,
-                    nutrition_data['name'],
-                    nutrition_data['calories'],
-                    nutrition_data['proteins'],
-                    nutrition_data['fats'],
-                    nutrition_data['carbs'],
-                    None,  # Не сохраняем фото для штрихкодов
-                    nutrition_data.get('portion_weight', 100),
-                    analysis_time
-                )
+                try:
+                    analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+                    DatabaseManager.save_food_analysis(
+                        user_id,
+                        nutrition_data['name'],
+                        nutrition_data['calories'],
+                        nutrition_data['proteins'],
+                        nutrition_data['fats'],
+                        nutrition_data['carbs'],
+                        None,  # Не сохраняем фото для штрихкодов
+                        nutrition_data.get('portion_weight', 100),
+                        analysis_time
+                    )
+                except Exception as db_error:
+                    logger.error(f"Ошибка при сохранении данных: {str(db_error)}")
+                    # Продолжаем выполнение, так как это некритичная ошибка
                 
                 # Отправка результатов пользователю
                 bot.edit_message_text(
@@ -1402,9 +1454,6 @@ def photo_handler(message):
                 message.chat.id,
                 processing_message.message_id
             )
-            # Удаление временного файла
-            if os.path.exists(photo_path):
-                os.remove(photo_path)
             return
         
         # Форматирование результатов (ингредиенты уже включены в результат)
@@ -1423,24 +1472,28 @@ def photo_handler(message):
         # Добавляем кнопку для подписки, если пользователь не подписан
         if not is_subscribed:
             remaining_requests -= 1
-            result_text += f"🔄Осталось запросов: {remaining_requests}\n"
+            result_text += f"\n🔄 Осталось запросов: {remaining_requests}\n"
             markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
         else:
-            result_text += "✅ Активная подписка\n"
+            result_text += "\n✅ Активная подписка\n"
         
         # Сохранение результатов анализа
-        analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
-        DatabaseManager.save_food_analysis(
-            user_id,
-            nutrition_data['name'],
-            nutrition_data['calories'],
-            nutrition_data['proteins'],
-            nutrition_data['fats'],
-            nutrition_data['carbs'],
-            photo_path,
-            nutrition_data.get('portion_weight', None),
-            analysis_time
-        )
+        try:
+            analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+            DatabaseManager.save_food_analysis(
+                user_id,
+                nutrition_data['name'],
+                nutrition_data['calories'],
+                nutrition_data['proteins'],
+                nutrition_data['fats'],
+                nutrition_data['carbs'],
+                photo_path,
+                nutrition_data.get('portion_weight', None),
+                analysis_time
+            )
+        except Exception as db_error:
+            logger.error(f"Ошибка при сохранении данных: {str(db_error)}")
+            # Продолжаем выполнение, так как это некритичная ошибка
         
         # Отправка результатов пользователю
         bot.edit_message_text(
@@ -1460,8 +1513,11 @@ def photo_handler(message):
         )
     finally:
         # Удаление временного файла, если он существует
-        if 'photo_path' in locals() and photo_path and os.path.exists(photo_path):
-            os.remove(photo_path)
+        if photo_path and os.path.exists(photo_path):
+            try:
+                os.remove(photo_path)
+            except Exception as cleanup_error:
+                logger.error(f"Ошибка при удалении временного файла: {str(cleanup_error)}")
 
 # Обработчик текстовых сообщений
 @bot.message_handler(func=lambda message: True)
@@ -1472,7 +1528,8 @@ def text_handler(message):
         "/start - Начать использование бота\n"
         "/help - Показать справку\n"
         "/subscription - Управление подпиской\n"
-        "/stats - Ваша статистика использования"
+        "/stats - Ваша статистика использования\n"
+        "/setup - Настройка профиля и норм КБЖУ"
     )
     
     bot.reply_to(message, help_text)
@@ -1489,4 +1546,4 @@ def run_polling():
 
 # Точка входа
 if __name__ == "__main__":
-    run_polling()
+    run_polling()      
