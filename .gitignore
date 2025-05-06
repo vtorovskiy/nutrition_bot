@@ -1,0 +1,6 @@
+/.env
+/__pycache__/
+/venv
+/nutrition_bot.db
+/webhook_server.py
+/google-credentials.json
