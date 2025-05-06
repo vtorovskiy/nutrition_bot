@@ -500,7 +500,7 @@ def stats_command(message):
 
 def show_stats_for_date(chat_id, user_id, selected_date):
     """
-    Показывает статистику за выбранную дату с прогресс-барами и индикаторами
+    Показывает компактную статистику за выбранную дату с блюдами
     
     Args:
         chat_id (int): ID чата для отправки сообщения
@@ -509,176 +509,126 @@ def show_stats_for_date(chat_id, user_id, selected_date):
     """
     # Получение статистики за выбранную дату
     daily_stats = DatabaseManager.get_nutrition_stats_for_date(user_id, selected_date)
-    
-    # Получение общей статистики
-    overall_stats = DatabaseManager.get_overall_stats(user_id)
-    
-    # Получение дневных норм пользователя
-    daily_norms = DatabaseManager.get_user_daily_norms(user_id)
-    
-    if not daily_stats and not overall_stats:
-        bot.send_message(chat_id, "У вас пока нет статистики использования.", parse_mode="Markdown")
-        return
-    
+
     # Форматируем дату для отображения
     date_str = selected_date.strftime("%d.%m.%Y")
     
-    # Формирование сообщения о потреблении за выбранную дату
-    stats_text = f"📊 *Ваша статистика питания за {date_str}*\n\n"
-    
-    # Если есть данные за выбранную дату
-    if daily_stats and daily_stats["total"]["count"] > 0:
-        # Если у пользователя настроены дневные нормы, добавляем общий прогресс
-        if daily_norms:
-            # Получаем индикаторы для общей статистики за день
-            indicators = get_nutrition_indicators(
-                {
-                    'calories': daily_stats['total']['calories'],
-                    'proteins': daily_stats['total']['proteins'],
-                    'fats': daily_stats['total']['fats'],
-                    'carbs': daily_stats['total']['carbs']
-                },
-                daily_norms
-            )
-            
-            if indicators:
-                stats_text += "*Дневной прогресс:*\n"
-                
-                if 'calories' in indicators:
-                    stats_text += f"{indicators['calories']['indicator']} Калории: {daily_stats['total']['calories']} ккал\n"
-                    stats_text += f"   {indicators['calories']['bar']} от нормы\n"
-                
-                if 'proteins' in indicators:
-                    stats_text += f"{indicators['proteins']['indicator']} Белки: {daily_stats['total']['proteins']} г\n"
-                    stats_text += f"   {indicators['proteins']['bar']} от нормы\n"
-                
-                if 'fats' in indicators:
-                    stats_text += f"{indicators['fats']['indicator']} Жиры: {daily_stats['total']['fats']} г\n"
-                    stats_text += f"   {indicators['fats']['bar']} от нормы\n"
-                
-                if 'carbs' in indicators:
-                    stats_text += f"{indicators['carbs']['indicator']} Углеводы: {daily_stats['total']['carbs']} г\n"
-                    stats_text += f"   {indicators['carbs']['bar']} от нормы\n"
-                
-                stats_text += "\n"
-        
-        # Добавляем информацию о приемах пищи
-        
-        # Завтрак
-        if daily_stats["breakfast"]["count"] > 0:
-            stats_text += "🍳 *Завтрак:*\n"
-            stats_text += f"Калории: {daily_stats['breakfast']['calories']} ккал\n"
-            stats_text += f"Белки: {daily_stats['breakfast']['proteins']} г\n"
-            stats_text += f"Жиры: {daily_stats['breakfast']['fats']} г\n"
-            stats_text += f"Углеводы: {daily_stats['breakfast']['carbs']} г\n"
-            
-            # Добавляем список блюд
-            stats_text += "\nБлюда:\n"
-            for i, item in enumerate(daily_stats["breakfast"]["items"], 1):
-                portion_info = f" ({item['portion_weight']}г)" if item.get('portion_weight') else ""
-                stats_text += f"  {i}. {item['name']}{portion_info} - {item['calories']} ккал ({item['time']})\n"
-            
-            stats_text += "\n"
-        
-        # Обед
-        if daily_stats["lunch"]["count"] > 0:
-            stats_text += "🍲 *Обед:*\n"
-            stats_text += f"Калории: {daily_stats['lunch']['calories']} ккал\n"
-            stats_text += f"Белки: {daily_stats['lunch']['proteins']} г\n"
-            stats_text += f"Жиры: {daily_stats['lunch']['fats']} г\n"
-            stats_text += f"Углеводы: {daily_stats['lunch']['carbs']} г\n"
-            
-            # Добавляем список блюд
-            stats_text += "\nБлюда:\n"
-            for i, item in enumerate(daily_stats["lunch"]["items"], 1):
-                portion_info = f" ({item['portion_weight']}г)" if item.get('portion_weight') else ""
-                stats_text += f"  {i}. {item['name']}{portion_info} - {item['calories']} ккал ({item['time']})\n"
-            
-            stats_text += "\n"
-        
-        # Ужин
-        if daily_stats["dinner"]["count"] > 0:
-            stats_text += "🍽 *Ужин:*\n"
-            stats_text += f"Калории: {daily_stats['dinner']['calories']} ккал\n"
-            stats_text += f"Белки: {daily_stats['dinner']['proteins']} г\n"
-            stats_text += f"Жиры: {daily_stats['dinner']['fats']} г\n"
-            stats_text += f"Углеводы: {daily_stats['dinner']['carbs']} г\n"
-            
-            # Добавляем список блюд
-            stats_text += "\nБлюда:\n"
-            for i, item in enumerate(daily_stats["dinner"]["items"], 1):
-                portion_info = f" ({item['portion_weight']}г)" if item.get('portion_weight') else ""
-                stats_text += f"  {i}. {item['name']}{portion_info} - {item['calories']} ккал ({item['time']})\n"
-            
-            stats_text += "\n"
-        
-        # Перекусы
-        if daily_stats["snack"]["count"] > 0:
-            stats_text += "🍪 *Перекусы:*\n"
-            stats_text += f"Калории: {daily_stats['snack']['calories']} ккал\n"
-            stats_text += f"Белки: {daily_stats['snack']['proteins']} г\n"
-            stats_text += f"Жиры: {daily_stats['snack']['fats']} г\n"
-            stats_text += f"Углеводы: {daily_stats['snack']['carbs']} г\n"
-            
-            # Добавляем список блюд
-            stats_text += "\nБлюда:\n"
-            for i, item in enumerate(daily_stats["snack"]["items"], 1):
-                portion_info = f" ({item['portion_weight']}г)" if item.get('portion_weight') else ""
-                stats_text += f"  {i}. {item['name']}{portion_info} - {item['calories']} ккал ({item['time']})\n"
-            
-            stats_text += "\n"
-        
-        # Итого за день (если нет дневных норм)
-        if not daily_norms:
-            stats_text += "📌 *Итого за день:*\n"
-            stats_text += f"Калории: {daily_stats['total']['calories']} ккал\n"
-            stats_text += f"Белки: {daily_stats['total']['proteins']} г\n"
-            stats_text += f"Жиры: {daily_stats['total']['fats']} г\n"
-            stats_text += f"Углеводы: {daily_stats['total']['carbs']} г\n\n"
-    else:
-        stats_text += f"За этот день нет данных о питании.\n\n"
-    
-    # Добавляем общую статистику
-    if overall_stats:
-        stats_text += "📈 *Общая статистика:*\n"
-        stats_text += f"Всего анализов: {overall_stats['total_analyses']}\n"
-        stats_text += f"Общее количество калорий: {overall_stats['total_calories']} ккал\n"
-        stats_text += f"Общее количество белков: {overall_stats['total_proteins']} г\n"
-        stats_text += f"Общее количество жиров: {overall_stats['total_fats']} г\n"
-        stats_text += f"Общее количество углеводов: {overall_stats['total_carbs']} г\n"
-    
-    # Если нет дневных норм, добавляем приглашение настроить профиль
-    if not daily_norms:
-        stats_text += "\n💡 _Используйте команду /setup для настройки персональных норм КБЖУ и отслеживания прогресса._"
-    
-    # Создаем кнопки для навигации по датам
+    # Создаем кнопки для навигации по датам - ВСЕГДА показываем кнопки
     markup = InlineKeyboardMarkup(row_width=3)
     
     # Кнопка для предыдущей даты
     prev_date = selected_date - timedelta(days=1)
-    has_prev_data = DatabaseManager.has_data_for_date(user_id, prev_date) or prev_date >= DatabaseManager.get_earliest_analysis_date(user_id) or prev_date >= (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).date() - timedelta(days=7)
-    
     prev_button = InlineKeyboardButton("⬅️ Пред. день", callback_data=f"stats_prev_{prev_date.strftime('%Y-%m-%d')}")
     
     # Кнопка для сегодня
+    today_date = (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).date()
     today_button = InlineKeyboardButton("Сегодня", callback_data=f"stats_today")
     
     # Кнопка для следующей даты
     next_date = selected_date + timedelta(days=1)
-    has_next_data = DatabaseManager.has_data_for_date(user_id, next_date) or next_date <= (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).date()
-    
+    can_show_next = next_date <= today_date
     next_button = InlineKeyboardButton("След. день ➡️", callback_data=f"stats_next_{next_date.strftime('%Y-%m-%d')}")
     
-    # Добавляем кнопки в зависимости от доступности данных
-    if has_prev_data:
-        if has_next_data:
-            markup.add(prev_button, today_button, next_button)
-        else:
-            markup.add(prev_button, today_button)
-    elif has_next_data:
-        markup.add(today_button, next_button)
+    # Добавляем кнопки (всегда показываем хотя бы кнопку "Сегодня")
+    if selected_date == today_date:
+        # Если текущий день - показываем только кнопку "Пред. день"
+        markup.add(prev_button, today_button)
+    elif can_show_next:
+        # Стандартный набор с тремя кнопками
+        markup.add(prev_button, today_button, next_button)
     else:
-        markup.add(today_button)
+        # Если это будущий день или день перед сегодняшним - нет кнопки "След. день"
+        markup.add(prev_button, today_button)
+    
+    # Проверяем, есть ли данные за выбранную дату
+    if not daily_stats or daily_stats["total"]["count"] == 0:
+        # Даже если данных нет, показываем кнопки навигации
+        stats_text = f"📊 Питание за {date_str}\n\nЗа этот день нет данных о питании."
+        bot.send_message(chat_id, stats_text, parse_mode="Markdown", reply_markup=markup)
+        return
+    
+    # Формирование компактного сообщения
+    stats_text = f"📊 Питание за {date_str}\n\n"
+    
+    # Завтрак
+    if daily_stats["breakfast"]["count"] > 0:
+        # Округляем значения
+        calories = int(daily_stats['breakfast']['calories'])
+        proteins = int(daily_stats['breakfast']['proteins'])
+        fats = int(daily_stats['breakfast']['fats'])
+        carbs = int(daily_stats['breakfast']['carbs'])
+        
+        stats_text += f"🍳 Завтрак: {calories} ккал\n"
+        stats_text += f"   Б/Ж/У: {proteins}г | {fats}г | {carbs}г\n"
+        
+        # Добавляем блюда
+        for item in daily_stats["breakfast"]["items"]:
+            item_calories = int(item['calories'])
+            stats_text += f"   • {item['name']} ({item_calories} ккал)\n"
+        
+        stats_text += "\n"
+    
+    # Обед
+    if daily_stats["lunch"]["count"] > 0:
+        # Округляем значения
+        calories = int(daily_stats['lunch']['calories'])
+        proteins = int(daily_stats['lunch']['proteins'])
+        fats = int(daily_stats['lunch']['fats'])
+        carbs = int(daily_stats['lunch']['carbs'])
+        
+        stats_text += f"🍲 Обед: {calories} ккал\n"
+        stats_text += f"   Б/Ж/У: {proteins}г | {fats}г | {carbs}г\n"
+        
+        # Добавляем блюда
+        for item in daily_stats["lunch"]["items"]:
+            item_calories = int(item['calories'])
+            stats_text += f"   • {item['name']} ({item_calories} ккал)\n"
+        
+        stats_text += "\n"
+    
+    # Ужин
+    if daily_stats["dinner"]["count"] > 0:
+        # Округляем значения
+        calories = int(daily_stats['dinner']['calories'])
+        proteins = int(daily_stats['dinner']['proteins'])
+        fats = int(daily_stats['dinner']['fats'])
+        carbs = int(daily_stats['dinner']['carbs'])
+        
+        stats_text += f"🍽 Ужин: {calories} ккал\n"
+        stats_text += f"   Б/Ж/У: {proteins}г | {fats}г | {carbs}г\n"
+        
+        # Добавляем блюда
+        for item in daily_stats["dinner"]["items"]:
+            item_calories = int(item['calories'])
+            stats_text += f"   • {item['name']} ({item_calories} ккал)\n"
+        
+        stats_text += "\n"
+    
+    # Перекусы
+    if daily_stats["snack"]["count"] > 0:
+        # Округляем значения
+        calories = int(daily_stats['snack']['calories'])
+        proteins = int(daily_stats['snack']['proteins'])
+        fats = int(daily_stats['snack']['fats'])
+        carbs = int(daily_stats['snack']['carbs'])
+        
+        stats_text += f"🍪 Перекус: {calories} ккал\n"
+        stats_text += f"   Б/Ж/У: {proteins}г | {fats}г | {carbs}г\n"
+        
+        # Добавляем блюда
+        for item in daily_stats["snack"]["items"]:
+            item_calories = int(item['calories'])
+            stats_text += f"   • {item['name']} ({item_calories} ккал)\n"
+        
+        stats_text += "\n"
+    
+    # Итоги за день
+    total_calories = int(daily_stats['total']['calories'])
+    total_proteins = int(daily_stats['total']['proteins'])
+    total_fats = int(daily_stats['total']['fats'])
+    total_carbs = int(daily_stats['total']['carbs'])
+    
+    stats_text += f"🔄 За день: {total_calories} ккал (Б: {total_proteins}г Ж: {total_fats}г У: {total_carbs}г)"
     
     bot.send_message(chat_id, stats_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -691,7 +641,7 @@ def stats_navigation_callback(call):
     # Обрабатываем различные типы команд навигации
     if call.data == "stats_today":
         # Показываем статистику за сегодня
-        user_stats_dates[user_id] = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET).date()
+        user_stats_dates[user_id] = (datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)).date()
     elif call.data.startswith("stats_prev_"):
         # Показываем статистику за предыдущий день
         date_str = call.data[11:]  # Получаем дату из callback_data
@@ -1037,15 +987,6 @@ def photo_handler(message):
     # Проверка статуса подписки
     is_subscribed = DatabaseManager.check_subscription_status(user_id)
     remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
-
-    # Добавление информации о подписке
-    if not is_subscribed:
-        remaining_requests -= 1
-        # Добавляем информацию о запросах
-        result_text += f"\n⏳ Осталось {remaining_requests} запросов"
-        result_text += f"\nℹ️ Для неограниченного доступа оформите подписку."
-    else:
-        result_text += "\n✅ Активная подписка"
     
     # Проверка доступности запросов
     if not is_subscribed and remaining_requests <= 0:
@@ -1102,20 +1043,8 @@ def photo_handler(message):
                 os.remove(photo_path)
             return
         
-        # Подготавливаем информацию о распознанных ингредиентах
-        detected_items = nutrition_data.get('detected_items', [])
-        detected_items_text = ""
-        
-        if detected_items:
-            detected_items_text = "\n\n🍽 *Распознанные ингредиенты:*\n"
-            for i, item in enumerate(detected_items, 1):
-                detected_items_text += f"{i}. {item}\n"
-        
-        # Форматирование результатов
+        # Форматирование результатов (ингредиенты уже включены в результат)
         result_text = format_nutrition_result(nutrition_data, user_id)
-        
-        # Добавление информации о распознанных ингредиентах
-        result_text += detected_items_text
         
         # Создаем клавиатуру для уточнения, если результаты неточные
         markup = InlineKeyboardMarkup(row_width=1)
@@ -1130,8 +1059,10 @@ def photo_handler(message):
         # Добавляем кнопку для подписки, если пользователь не подписан
         if not is_subscribed:
             remaining_requests -= 1
-            result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
+            result_text += f"🔄Осталось запросов: {remaining_requests}\n"
             markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+        else:
+            result_text += "✅ Активная подписка\n"
         
         # Сохранение результатов анализа
         analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
