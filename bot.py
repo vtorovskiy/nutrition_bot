@@ -13,6 +13,7 @@ from database.models import User, FoodAnalysis
 from datetime import datetime, timedelta, date
 from telebot.handler_backends import State, StatesGroup
 from utils.helpers import get_nutrition_indicators
+from database.models import User, FoodAnalysis, UserSubscription
 
 # Настройка логирования
 logging.basicConfig(
@@ -549,13 +550,14 @@ def subscription_command(message):
     # Формирование сообщения
     if is_subscribed:
         # Получение информации о подписке
-        session = DatabaseManager.Session()
+        from database.db_manager import Session  # Правильный импорт
+        session = Session()
         try:
             user = session.query(User).filter_by(telegram_id=user_id).first()
-            subscription = session.query(DatabaseManager.UserSubscription).filter_by(
+            subscription = session.query(UserSubscription).filter_by(
                 user_id=user.id, 
                 is_active=True
-            ).order_by(DatabaseManager.UserSubscription.end_date.desc()).first()
+            ).order_by(UserSubscription.end_date.desc()).first()
             
             end_date = subscription.end_date if subscription else None
             remaining_days = get_remaining_subscription_days(end_date)

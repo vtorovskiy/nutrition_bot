@@ -21,7 +21,7 @@ YUKASSA_SECRET_KEY = os.getenv('YUKASSA_SECRET_KEY')
 SUBSCRIPTION_COST = 299
 
 # Лимиты для бесплатного использования
-FREE_REQUESTS_LIMIT = 100
+FREE_REQUESTS_LIMIT = 10
 
 # Настройки базы данных
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///nutrition_bot.db')
