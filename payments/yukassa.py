@@ -2,6 +2,9 @@ from yookassa import Configuration, Payment
 import uuid
 import sys
 import os
+from monitoring.decorators import track_api_call
+from monitoring.decorators import track_command, track_user_action
+from monitoring.metrics import metrics_collector
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,6 +17,7 @@ Configuration.secret_key = YUKASSA_SECRET_KEY
 class YuKassaPayment:
     """Класс для работы с платежной системой ЮKassa"""
     
+    @track_api_call('yukassa_create_payment')
     @staticmethod
     def create_payment(user_id, months=1, description="Подписка на бота для анализа КБЖУ"):
         """
@@ -66,6 +70,7 @@ class YuKassaPayment:
             print(f"Ошибка при создании платежа: {str(e)}")
             return None
     
+    @track_api_call('yukassa_check_payment')
     @staticmethod
     def check_payment_status(payment_id):
         """
@@ -92,6 +97,7 @@ class YuKassaPayment:
             print(f"Ошибка при проверке статуса платежа: {str(e)}")
             return None
     
+    @track_api_call('yukassa_process_webhook')
     @staticmethod
     def process_webhook(data):
         """

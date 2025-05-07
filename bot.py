@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, date
 from utils.helpers import get_nutrition_indicators
 from database.models import User, FoodAnalysis, UserSubscription
 from food_recognition.barcode_scanner import BarcodeScanner
+from monitoring.metrics import metrics_collector
+from monitoring.decorators import track_command, track_api_call, track_user_action
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,6 +37,9 @@ from utils.helpers import (
 
 # Московское время: UTC+3
 TIMEZONE_OFFSET = 3  # Часы
+
+# ID администраторов, которые могут просматривать метрики
+ADMIN_IDS = [931190875]
 
 # Инициализация хранилища состояний
 state_storage = StateMemoryStorage()
@@ -66,6 +71,7 @@ aitunnel_adapter = AITunnelNutritionAdapter()
 
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
+@track_command('start')
 def start(message):
     """Обработчик команды /start"""
     user_id = message.from_user.id
@@ -103,10 +109,86 @@ def start(message):
     
     # Добавляем кнопку для расчета КБЖУ
     markup.add(InlineKeyboardButton("Рассчитать норму КБЖУ", callback_data="setup_profile"))
+
+    # Путь к приветственной фотографии
+    welcome_image_path = os.path.join(os.path.dirname(__file__), 'static', 'start_photo.jpg')
     
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+    try:
+        # Отправляем фото с текстом
+        with open(welcome_image_path, 'rb') as photo:
+            bot.send_photo(
+                message.chat.id, 
+                photo, 
+                caption=welcome_text, 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке приветственного изображения: {str(e)}")
+        # В случае ошибки отправляем только текст
+        bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+
+@bot.message_handler(commands=['metrics'])
+@track_command('metrics')
+def metrics_command(message):
+    """Обработчик команды /metrics для просмотра текущих метрик"""
+    user_id = message.from_user.id
+    
+    # Проверка прав доступа (замените на ваш ID)
+    if user_id not in [931190875]:
+        bot.reply_to(message, "У вас нет доступа к этой команде.")
+        return
+    
+    try:
+        # Получение сводки по метрикам
+        metrics_summary = metrics_collector.get_metrics_summary()
+        
+        # Формирование сообщения БЕЗ Markdown-форматирования
+        main_metrics = (
+            "📊 Сводка по метрикам\n\n"
+            f"⏱ Время работы: {metrics_summary.get('uptime', 'N/A')}\n\n"
+            f"👤 Уникальных пользователей: {metrics_summary.get('unique_users_count', 0)}\n"
+            f"📸 Анализов фотографий: {metrics_summary.get('photo_analyses', 0)}\n"
+            f"🔍 Сканирований штрихкодов: {metrics_summary.get('barcode_scans', 0)}\n"
+            f"💳 Покупок подписок: {metrics_summary.get('subscription_purchases', 0)}\n\n"
+            f"📡 API вызовов всего: {metrics_summary.get('total_api_calls', 0)}\n"
+            f"⚠️ Ошибок API: {metrics_summary.get('total_api_errors', 0)} "
+            f"({metrics_summary.get('error_rate', '0%')})"
+        )
+        
+        # Отправляем основную информацию БЕЗ указания parse_mode
+        bot.reply_to(message, main_metrics)
+        
+        # Популярные команды - без Markdown
+        if metrics_summary.get('popular_commands'):
+            commands_text = "Популярные команды:\n"
+            for cmd, count in metrics_summary.get('popular_commands', {}).items():
+                commands_text += f"• {cmd}: {count}\n"
+            
+            bot.send_message(message.chat.id, commands_text)
+        
+        # Время ответа API - без Markdown
+        if metrics_summary.get('avg_response_times'):
+            api_text = "Среднее время ответа API (сек):\n"
+            for api, avg_time in metrics_summary.get('avg_response_times', {}).items():
+                api_text += f"• {api}: {avg_time:.3f}\n"
+            
+            bot.send_message(message.chat.id, api_text)
+        
+        # Ошибки - без Markdown
+        if metrics_summary.get('top_errors'):
+            errors_text = "Частые ошибки:\n"
+            for error, count in metrics_summary.get('top_errors', {}).items():
+                errors_text += f"• {error}: {count}\n"
+            
+            bot.send_message(message.chat.id, errors_text)
+            
+    except Exception as e:
+        logger.error(f"Ошибка при формировании метрик: {str(e)}")
+        bot.reply_to(message, f"Произошла ошибка при формировании метрик: {str(e)}")
 
 @bot.message_handler(commands=['setup'])
+@track_command('setup')
 def setup_command(message):
     """Обработчик команды /setup для настройки профиля пользователя"""
     user_id = message.from_user.id
@@ -522,6 +604,7 @@ def process_manual_norms(message):
 
 # Обработчик команды /help
 @bot.message_handler(commands=['help'])
+@track_command('help')
 def help_command(message):
     """Обработчик команды /help"""
     help_text = (
@@ -549,6 +632,7 @@ def help_command(message):
 
 # Обработчик команды /subscription
 @bot.message_handler(commands=['subscription'])
+@track_command('subscription')
 def subscription_command(message):
     """Обработчик команды /subscription"""
     user_id = message.from_user.id
@@ -600,6 +684,7 @@ def subscription_command(message):
 
 # Обработчик команды /stats
 @bot.message_handler(commands=['stats'])
+@track_command('stats')
 def stats_command(message):
     """Обработчик команды /stats с возможностью листать даты"""
     user_id = message.from_user.id
@@ -780,6 +865,7 @@ def stats_navigation_callback(call):
 
 # Обработчик для кнопки ручного ввода
 @bot.callback_query_handler(func=lambda call: call.data == "manual_input")
+@track_command('manual_input')
 def manual_input_callback(call):
     """Обработчик кнопки ручного ввода данных о продукте"""
     user_id = call.from_user.id
@@ -814,6 +900,7 @@ def manual_input_callback(call):
     bot.set_state(user_id, BotStates.waiting_for_product_name, chat_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "specify_food")
+@track_command('specify_food')
 def specify_food_callback(call):
     """Обработчик кнопки уточнения блюда"""
     user_id = call.from_user.id
@@ -837,6 +924,7 @@ def specify_food_callback(call):
     )
 
 @bot.callback_query_handler(func=lambda call: call.data == "specify_portion")
+@track_command('specify_portion')
 def specify_portion_callback(call):
     """Обработчик кнопки указания размера порции"""
     user_id = call.from_user.id
@@ -860,6 +948,7 @@ def specify_portion_callback(call):
     )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("subscribe"))
+@track_command('subscribe_payment')
 def subscription_callback(call):
     """Обработчик кнопок подписки"""
     user_id = call.from_user.id
@@ -1367,6 +1456,7 @@ def photo_handler(message):
 
         # Проверка на штрихкод
         if 'is_barcode' in nutrition_data:
+            metrics_collector.track_barcode_scan(user_id)
             # Это штрихкод, формируем специальное сообщение
             if nutrition_data.get('estimated', True):
                 # Если продукт не найден в базах данных
@@ -1455,6 +1545,8 @@ def photo_handler(message):
                 processing_message.message_id
             )
             return
+
+        metrics_collector.track_photo_analysis(user_id)
         
         # Форматирование результатов (ингредиенты уже включены в результат)
         result_text = format_nutrition_result(nutrition_data, user_id)

@@ -6,6 +6,9 @@ import json
 from pyzbar.pyzbar import decode
 from PIL import Image
 from google.cloud import vision
+from monitoring.decorators import track_api_call
+from monitoring.decorators import track_command, track_user_action
+from monitoring.metrics import metrics_collector
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,7 +24,8 @@ class BarcodeScanner:
         if GOOGLE_APPLICATION_CREDENTIALS:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_APPLICATION_CREDENTIALS
             self.vision_client = vision.ImageAnnotatorClient()
-    
+
+    @track_api_call('barcode_detect')
     def detect_barcode(self, image_path=None, image_content=None):
         """
         Распознавание штрихкода на изображении
@@ -73,7 +77,8 @@ class BarcodeScanner:
         except Exception as e:
             print(f"Ошибка при распознавании штрихкода: {str(e)}")
             return None
-    
+
+    @track_api_call('barcode_product_info')
     def get_product_info(self, barcode):
         """
         Получение информации о продукте по штрихкоду

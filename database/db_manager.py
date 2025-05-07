@@ -5,6 +5,9 @@ import sys
 import os
 from datetime import datetime, time, timedelta
 from database.models import User, FoodAnalysis, init_db
+from monitoring.decorators import track_api_call
+from monitoring.decorators import track_command, track_user_action
+from monitoring.metrics import metrics_collector
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -523,6 +526,7 @@ class DatabaseManager:
             session.close()
 
     
+    @track_api_call('db_save_food_analysis')
     @staticmethod
     def save_food_analysis(telegram_id, food_name, calories, proteins, fats, carbs, image_path=None, portion_weight=None, analysis_time=None):
         """Сохранить результаты анализа пищи"""
@@ -573,6 +577,7 @@ class DatabaseManager:
         finally:
             session.close()
     
+    @track_api_call('db_add_subscription')
     @staticmethod
     def add_subscription(telegram_id, months=1, payment_id=None):
         """Добавить подписку пользователю"""

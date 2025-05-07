@@ -6,6 +6,9 @@ import json
 import re
 from openai import OpenAI
 from typing import Optional, List, Dict, Any
+from utils.api_helpers import retry_on_exception
+from monitoring.decorators import track_command, track_user_action, track_api_call
+from monitoring.metrics import metrics_collector
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,7 +30,8 @@ class AITunnelVisionFoodRecognition:
         
         # Модель GPT-4 Vision
         self.model = "gpt-4o"  # или "gpt-4-vision-preview" в зависимости от доступных моделей
-    
+
+    @track_api_call('aitunnel_encode_image')
     def _encode_image(self, image_path: str) -> str:
         """
         Кодирование изображения в base64 для отправки в API
@@ -40,7 +44,10 @@ class AITunnelVisionFoodRecognition:
         """
         with open(image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
-    
+            
+    @retry_on_exception(max_retries=3, retry_delay=2, 
+                   exceptions=(requests.exceptions.RequestException, ValueError))
+    @track_api_call('aitunnel_vision')
     def detect_food(self, image_path: Optional[str] = None, image_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
         """
         Распознавание пищи на изображении с помощью GPT-4 Vision через AITunnel

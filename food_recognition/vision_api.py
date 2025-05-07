@@ -4,6 +4,9 @@ import os
 import sys
 import requests
 import json
+from monitoring.decorators import track_api_call
+from monitoring.decorators import track_command, track_user_action
+from monitoring.metrics import metrics_collector
 
 # Добавляем корневую директорию проекта в путь для импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +20,8 @@ class FoodRecognition:
     
     def __init__(self):
         self.client = vision.ImageAnnotatorClient()
-    
+
+    @track_api_call('google_vision')
     def detect_food(self, image_path=None, image_content=None):
         """
         Улучшенное распознавание пищи на изображении с использованием 
