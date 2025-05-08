@@ -18,6 +18,8 @@ from monitoring.metrics import metrics_collector
 from monitoring.decorators import track_command, track_api_call, track_user_action
 import time
 from config import PAYMENT_PROVIDER_TOKEN, SUBSCRIPTION_COST
+import traceback
+
 
 # Настройка логирования
 logging.basicConfig(
