@@ -16,6 +16,8 @@ from database.models import User, FoodAnalysis, UserSubscription
 from food_recognition.barcode_scanner import BarcodeScanner
 from monitoring.metrics import metrics_collector
 from monitoring.decorators import track_command, track_api_call, track_user_action
+import time
+from config import PAYMENT_PROVIDER_TOKEN, SUBSCRIPTION_COST
 
 # Настройка логирования
 logging.basicConfig(
@@ -143,10 +145,11 @@ def metrics_command(message):
         # Получение сводки по метрикам
         metrics_summary = metrics_collector.get_metrics_summary()
         
-        # Формирование сообщения БЕЗ Markdown-форматирования
+        # Основная информация
         main_metrics = (
             "📊 Сводка по метрикам\n\n"
-            f"⏱ Время работы: {metrics_summary.get('uptime', 'N/A')}\n\n"
+            f"⏱ Время работы: {metrics_summary.get('uptime', 'N/A')}\n"
+            f"🔄 Количество перезапусков: {metrics_summary.get('restart_count', 0)}\n\n"
             f"👤 Уникальных пользователей: {metrics_summary.get('unique_users_count', 0)}\n"
             f"📸 Анализов фотографий: {metrics_summary.get('photo_analyses', 0)}\n"
             f"🔍 Сканирований штрихкодов: {metrics_summary.get('barcode_scans', 0)}\n"
@@ -156,7 +159,7 @@ def metrics_command(message):
             f"({metrics_summary.get('error_rate', '0%')})"
         )
         
-        # Отправляем основную информацию БЕЗ указания parse_mode
+        # Отправляем основную информацию
         bot.reply_to(message, main_metrics)
         
         # Популярные команды - без Markdown
@@ -602,6 +605,51 @@ def process_manual_norms(message):
             "❌ Произошла ошибка при обновлении норм. Пожалуйста, попробуйте позже."
         )
 
+def send_payment_invoice(chat_id, title, description, amount, months, user_id=None):
+    """
+    Отправляет счет на оплату через Telegram Payments API
+    
+    Args:
+        chat_id (int): ID чата пользователя
+        title (str): Название товара/услуги
+        description (str): Описание товара/услуги
+        amount (float): Сумма к оплате
+        months (int): Количество месяцев подписки
+        user_id (int, optional): ID пользователя (если None, то берется chat_id)
+    """
+    try:
+        # Если user_id не передан, используем chat_id (для личных чатов они совпадают)
+        if user_id is None:
+            user_id = chat_id
+        
+        # Создаем уникальный идентификатор платежа
+        payload = f"subscription_{user_id}_{months}_{int(time.time())}"
+        
+        # Преобразуем сумму в копейки (минимальные единицы валюты)
+        price_amount = int(amount * 100)  # Например, 100.50 рублей = 10050 копеек
+        
+        # Создаем массив цен (может содержать несколько позиций)
+        prices = [
+            types.LabeledPrice(label=title, amount=price_amount)
+        ]
+        
+        # Отправляем счет
+        bot.send_invoice(
+            chat_id=chat_id,
+            title=title,                         # Название товара
+            description=description,             # Описание товара
+            invoice_payload=payload,             # Полезные данные для идентификации платежа
+            provider_token=PAYMENT_PROVIDER_TOKEN,  # Токен от BotFather
+            currency="RUB",                      # Валюта
+            prices=prices,                       # Массив цен
+            start_parameter=f"sub_{months}m"     # Параметр для глубоких ссылок
+        )
+        logger.info(f"Счет на оплату отправлен пользователю {chat_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка при отправке счета: {str(e)}")
+        return False
+
 # Обработчик команды /help
 @bot.message_handler(commands=['help'])
 @track_command('help')
@@ -947,75 +995,76 @@ def specify_portion_callback(call):
         reply_markup=None
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("subscribe"))
+@bot.callback_query_handler(func=lambda call: call.data == "subscribe")
+@track_command('subscribe_menu')
+def subscribe_menu_callback(call):
+    """Обработчик кнопки 'Оформить подписку' - показывает меню вариантов подписки"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Создаем клавиатуру с вариантами подписки
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("1 месяц", callback_data="subscribe_1"),
+        InlineKeyboardButton("3 месяца (-10%)", callback_data="subscribe_3"),
+        InlineKeyboardButton("6 месяцев (-15%)", callback_data="subscribe_6"),
+        InlineKeyboardButton("12 месяцев (-20%)", callback_data="subscribe_12")
+    )
+    
+    # Обновляем сообщение с вариантами подписки
+    bot.edit_message_text(
+        "Выберите срок подписки:",
+        chat_id,
+        call.message.message_id,
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("subscribe_"))
 @track_command('subscribe_payment')
 def subscription_callback(call):
     """Обработчик кнопок подписки"""
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     
-    if call.data == "subscribe":
-        # Выбор периода подписки
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("1 месяц", callback_data="subscribe_1"))
-        markup.add(InlineKeyboardButton("3 месяца (-10%)", callback_data="subscribe_3"))
-        markup.add(InlineKeyboardButton("6 месяцев (-15%)", callback_data="subscribe_6"))
-        markup.add(InlineKeyboardButton("12 месяцев (-20%)", callback_data="subscribe_12"))
-        
-        bot.edit_message_text(
-            "Выберите период подписки:",
-            chat_id,
-            call.message.message_id,
-            reply_markup=markup
-        )
+    # Получаем количество месяцев
+    months = int(call.data.split("_")[1])
     
-    elif call.data.startswith("subscribe_"):
-        # Создание платежа
-        months = int(call.data.split("_")[1])
-        
-        # Расчет скидки
-        discount = 0
-        if months == 3:
-            discount = 0.1  # 10%
-        elif months == 6:
-            discount = 0.15  # 15%
-        elif months == 12:
-            discount = 0.2  # 20%
-        
-        # Создание платежа с учетом скидки
-        amount = SUBSCRIPTION_COST * months * (1 - discount)
-        description = f"Подписка на бота для анализа КБЖУ на {months} мес."
-        
-        try:
-            # Создание платежа в ЮKassa
-            payment_data = YuKassaPayment.create_payment(user_id, months, description)
-            
-            if payment_data and payment_data.get('confirmation_url'):
-                # Формирование сообщения
-                payment_text = (
-                    f"💳 *Оплата подписки*\n\n"
-                    f"Период: {months} мес.\n"
-                    f"Стоимость: {payment_data['amount']} {payment_data['currency']}\n\n"
-                    "Для оплаты перейдите по ссылке ниже:"
-                )
-                
-                # Кнопка для оплаты
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("Оплатить", url=payment_data['confirmation_url']))
-                
-                bot.edit_message_text(
-                    payment_text,
-                    chat_id,
-                    call.message.message_id,
-                    parse_mode="Markdown",
-                    reply_markup=markup
-                )
-            else:
-                bot.answer_callback_query(call.id, "Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
-        except Exception as e:
-            logger.error(f"Ошибка при создании платежа: {str(e)}")
-            bot.answer_callback_query(call.id, "Ошибка при создании платежа. Попробуйте позже.", show_alert=True)
-            bot.send_message(chat_id, "Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.")
+    # Расчет скидки
+    discount = 0
+    if months == 3:
+        discount = 0.1  # 10%
+    elif months == 6:
+        discount = 0.15  # 15%
+    elif months == 12:
+        discount = 0.2  # 20%
+    
+    # Рассчитываем сумму с учетом скидки
+    amount = SUBSCRIPTION_COST * months * (1 - discount)
+    amount_rounded = round(amount, 2)  # Округляем до 2 знаков
+    
+    # Данные для счета
+    title = f"Подписка на {months} мес."
+    description = f"Подписка на бота для анализа КБЖУ на {months} месяцев"
+    
+    # Отправляем сообщение, что готовим счет
+    bot.edit_message_text(
+        f"Подготовка счета на оплату подписки на {months} мес...",
+        chat_id,
+        call.message.message_id
+    )
+    
+    # Также отслеживаем, какой тип подписки выбран
+    metrics_collector.track_command(f'subscribe_{months}m')
+    
+    # Отправляем счет через Telegram Payments API
+    result = send_payment_invoice(chat_id, title, description, amount_rounded, months, user_id)
+    
+    if not result:
+        bot.edit_message_text(
+            "Произошла ошибка при создании счета. Пожалуйста, попробуйте позже или обратитесь в поддержку.",
+            chat_id,
+            call.message.message_id
+        )
 
 # Обработчик ввода названия продукта
 @bot.message_handler(state=BotStates.waiting_for_product_name)
@@ -1625,6 +1674,80 @@ def text_handler(message):
     )
     
     bot.reply_to(message, help_text)
+
+# Обработчик предварительной проверки платежа
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def process_pre_checkout_query(pre_checkout_query):
+    """
+    Обрабатывает предварительную проверку платежа
+    Telegram отправляет это событие после того, как пользователь 
+    нажал кнопку оплаты, но до фактического проведения платежа
+    """
+    try:
+        # На этом этапе можно проверить наличие товара, валидность данных и т.д.
+        # Если все в порядке, просто отвечаем ok=True
+        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+        logger.info(f"Pre-checkout прошел успешно: {pre_checkout_query.id}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке pre_checkout_query: {str(e)}")
+        bot.answer_pre_checkout_query(
+            pre_checkout_query.id, 
+            ok=False, 
+            error_message="Произошла ошибка при обработке платежа. Пожалуйста, попробуйте позже."
+        )
+
+# Обработчик успешного платежа
+@bot.message_handler(content_types=['successful_payment'])
+def process_successful_payment(message):
+    """
+    Обрабатывает успешные платежи
+    Telegram отправляет это событие после успешного завершения платежа
+    """
+    try:
+        # Получаем информацию о платеже
+        payment_info = message.successful_payment
+        user_id = message.from_user.id
+        
+        # Извлекаем данные из payload (наш формат: subscription_[user_id]_[months]_[timestamp])
+        payload_parts = payment_info.invoice_payload.split('_')
+        months = int(payload_parts[2]) if len(payload_parts) > 2 else 1
+        
+        # Получаем ID транзакции в ЮKassa
+        transaction_id = payment_info.provider_payment_charge_id
+        
+        # Добавляем подписку в базу данных
+        result = DatabaseManager.add_subscription(user_id, months, transaction_id)
+        
+        if result:
+            # Отслеживаем метрику покупки подписки
+            metrics_collector.track_subscription_purchase()
+            metrics_collector.save_metrics()  # Явно сохраняем метрики после покупки
+            
+            # Отправляем сообщение об успешной оплате
+            success_text = (
+                f"✅ *Оплата успешно выполнена!*\n\n"
+                f"Ваша подписка активирована на {months} мес.\n"
+                f"Теперь вам доступно неограниченное количество запросов."
+            )
+            
+            bot.send_message(
+                message.chat.id,
+                success_text,
+                parse_mode="Markdown"
+            )
+            logger.info(f"Подписка успешно активирована для пользователя {user_id} на {months} мес.")
+        else:
+            bot.send_message(
+                message.chat.id,
+                "Возникла ошибка при активации подписки. Пожалуйста, обратитесь в поддержку."
+            )
+            logger.error(f"Ошибка при активации подписки для пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке успешного платежа: {str(e)}")
+        bot.send_message(
+            message.chat.id,
+            "Возникла ошибка при обработке платежа. Пожалуйста, обратитесь в поддержку."
+        )
 
 # Регистрируем фильтр для работы с состояниями
 bot.add_custom_filter(custom_filters.StateFilter(bot))

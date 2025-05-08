@@ -19,6 +19,21 @@ class MetricsCollector:
             save_interval (int): Интервал сохранения метрик в секундах (по умолчанию: 1 час)
             metrics_file (str): Имя файла для сохранения метрик
         """
+        self.metrics_file = metrics_file
+        self.save_interval = save_interval
+        self.lock = threading.Lock()
+        
+        # Инициализация метрик значениями по умолчанию
+        self._init_default_metrics()
+        
+        # Попытка загрузки существующих метрик из файла
+        self._load_metrics()
+        
+        # Запуск фонового потока для периодического сохранения метрик
+        self._start_background_save()
+    
+    def _init_default_metrics(self):
+        """Инициализация метрик значениями по умолчанию"""
         self.metrics = {
             'api_calls': defaultdict(int),            # Количество вызовов каждого API
             'api_errors': defaultdict(int),           # Количество ошибок каждого API
@@ -31,17 +46,75 @@ class MetricsCollector:
             'errors': defaultdict(int),               # Количество ошибок по типам
             'start_time': datetime.now().isoformat(), # Время запуска коллектора
         }
-        
         self.max_response_times = 100  # Хранить только последние 100 значений времени ответа
-        self.save_interval = save_interval
-        self.metrics_file = metrics_file
-        self.lock = threading.Lock()
-        
-        # Преобразование defaultdict в обычные dict для сериализации
         self._last_save = time.time()
-        
-        # Запуск фонового потока для периодического сохранения метрик
-        self._start_background_save()
+    
+    def _load_metrics(self):
+        """Загрузка метрик из файла, если он существует"""
+        try:
+            if os.path.exists(self.metrics_file):
+                with open(self.metrics_file, 'r', encoding='utf-8') as f:
+                    saved_metrics = json.load(f)
+                
+                logger.info(f"Загружаем метрики из файла: {saved_metrics}")
+                
+                # Обновление метрик из сохраненного файла
+                with self.lock:
+                    # API вызовы - слияние данных, сохраняя накопленные значения
+                    for api, count in saved_metrics.get('api_calls', {}).items():
+                        self.metrics['api_calls'][api] = count
+                    
+                    # API ошибки - слияние данных
+                    for api, count in saved_metrics.get('api_errors', {}).items():
+                        self.metrics['api_errors'][api] = count
+                    
+                    # Время ответа API - слияние данных
+                    for api, times in saved_metrics.get('api_response_times', {}).items():
+                        if times:
+                            self.metrics['api_response_times'][api] = deque(times, maxlen=self.max_response_times)
+                    
+                    # Счетчики - прямое присвоение из файла
+                    self.metrics['photo_analyses'] = saved_metrics.get('photo_analyses', 0)
+                    self.metrics['barcode_scans'] = saved_metrics.get('barcode_scans', 0)
+                    self.metrics['subscription_purchases'] = saved_metrics.get('subscription_purchases', 0)
+                    
+                    # Уникальные пользователи
+                    if 'unique_users' in saved_metrics:
+                        # Если сохранено число, преобразуем его в множество с одним элементом
+                        if isinstance(saved_metrics['unique_users'], int):
+                            self.metrics['unique_users'] = set([1])  # Хотя бы один пользователь
+                        # Если сохранен список, преобразуем его в множество
+                        elif isinstance(saved_metrics['unique_users'], list):
+                            self.metrics['unique_users'] = set(saved_metrics['unique_users'])
+                    
+                    # Команды - слияние данных
+                    for cmd, count in saved_metrics.get('user_commands', {}).items():
+                        self.metrics['user_commands'][cmd] = count
+                    
+                    # Ошибки - слияние данных
+                    for error, count in saved_metrics.get('errors', {}).items():
+                        self.metrics['errors'][error] = count
+                    
+                    # Сохраняем время запуска из сохраненных метрик, а не текущее
+                    if 'start_time' in saved_metrics:
+                        self.metrics['start_time'] = saved_metrics['start_time']
+                    
+                    # Обновляем счетчик перезапусков
+                    self.metrics['restart_count'] = saved_metrics.get('restart_count', 0) + 1
+                    
+                    # Добавляем историю времен запуска
+                    self.metrics['start_times'] = saved_metrics.get('start_times', [])
+                    
+                    # Добавляем текущее время запуска в историю
+                    self.metrics['start_times'].append(datetime.now().isoformat())
+                    
+                logger.info(f"Метрики успешно загружены и обновлены")
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке метрик: {str(e)}")
+            # Выводим traceback для отладки
+            import traceback
+            logger.error(traceback.format_exc())
+
     
     def _start_background_save(self):
         """Запуск фонового потока для периодического сохранения метрик"""
@@ -162,7 +235,9 @@ class MetricsCollector:
                     key=lambda x: x[1], 
                     reverse=True
                 )[:5]),  # топ-5 ошибок
-                'uptime': f"{uptime_seconds / 3600:.1f} часов"
+                'uptime': f"{uptime_seconds / 3600:.1f} часов",
+                'restart_count': self.metrics.get('restart_count', 0),
+                'start_times': self.metrics.get('start_times', [])
             }
     
     def save_metrics(self):
@@ -176,16 +251,35 @@ class MetricsCollector:
                     'api_response_times': {k: list(v) for k, v in self.metrics['api_response_times'].items()},
                     'photo_analyses': self.metrics['photo_analyses'],
                     'barcode_scans': self.metrics['barcode_scans'],
-                    'unique_users': len(self.metrics['unique_users']),
+                    # Сохраняем как список для возможности восстановления
+                    'unique_users': list(self.metrics['unique_users']) if isinstance(self.metrics['unique_users'], set) else [],
                     'user_commands': dict(self.metrics['user_commands']),
                     'subscription_purchases': self.metrics['subscription_purchases'],
                     'errors': dict(self.metrics['errors']),
                     'start_time': self.metrics['start_time'],
+                    'restart_count': self.metrics.get('restart_count', 0),
+                    'start_times': self.metrics.get('start_times', []),
                     'save_time': datetime.now().isoformat()
                 }
                 
-                # Создание директории для метрик, если она не существует
-                os.makedirs(os.path.dirname(os.path.abspath(self.metrics_file)), exist_ok=True)
+                # Получаем директорию для сохранения
+                directory = os.path.dirname(self.metrics_file)
+                
+                # Если путь относительный, делаем его абсолютным от текущей директории
+                if not os.path.isabs(directory) and directory:
+                    directory = os.path.join(os.getcwd(), directory)
+                
+                # Создаем директорию, если она не существует
+                if directory and not os.path.exists(directory):
+                    try:
+                        os.makedirs(directory, exist_ok=True)
+                        logger.info(f"Создана директория для метрик: {directory}")
+                    except Exception as dir_error:
+                        logger.error(f"Ошибка при создании директории {directory}: {str(dir_error)}")
+                
+                # Печатаем полный путь к файлу для отладки
+                full_path = os.path.abspath(self.metrics_file)
+                logger.info(f"Сохраняем метрики в файл: {full_path}")
                 
                 # Сохранение метрик в файл
                 with open(self.metrics_file, 'w', encoding='utf-8') as f:
@@ -195,9 +289,13 @@ class MetricsCollector:
                 self._last_save = time.time()
         except Exception as e:
             logger.error(f"Ошибка при сохранении метрик: {str(e)}")
+            # Выводим более подробную информацию об ошибке
+            import traceback
+            logger.error(traceback.format_exc())
+
 
 # Создание глобального экземпляра коллектора метрик
 metrics_collector = MetricsCollector(
     save_interval=3600,  # Сохранять метрики каждый час
-    metrics_file='data/metrics.json'
+    metrics_file='/home/dq12777/nutrition_bot/data/metrics.json'  # Абсолютный путь
 )
