@@ -5,15 +5,13 @@ import json
 import os
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
-import traceback
-import time
 
 logger = logging.getLogger(__name__)
 
 class MetricsCollector:
     """Коллектор метрик для отслеживания производительности и выявления проблем"""
     
-    def __init__(self, save_interval=3600, metrics_file='metrics.json'):
+    def __init__(self, save_interval=3600, metrics_file='data/metrics.json'):
         """
         Инициализация коллектора метрик
         
@@ -47,9 +45,9 @@ class MetricsCollector:
             'user_commands': defaultdict(int),        # Количество выполненных команд
             'subscription_purchases': 0,              # Количество покупок подписок
             'errors': defaultdict(int),               # Количество ошибок по типам
-            'start_time': datetime.now().isoformat(),
+            'start_time': current_time,               # Время запуска коллектора
             'restart_count': 0,                       # Счетчик перезапусков
-            'start_times': [current_time]             # История времен запуска # Время запуска коллектора
+            'start_times': [current_time]             # История времен запуска
         }
         self.max_response_times = 100  # Хранить только последние 100 значений времени ответа
         self._last_save = time.time()
@@ -58,44 +56,44 @@ class MetricsCollector:
         """Загрузка метрик из файла, если он существует"""
         try:
             if os.path.exists(self.metrics_file):
-                print(f"[DEBUG] Загружаем метрики из файла: {self.metrics_file}")
                 with open(self.metrics_file, 'r', encoding='utf-8') as f:
                     saved_metrics = json.load(f)
                 
-                print(f"[DEBUG] Содержимое файла метрик: {saved_metrics}")
-                logger.info(f"Загружаем метрики из файла: {self.metrics_file}")
-                
                 # Обновление метрик из сохраненного файла
                 with self.lock:
-                    # API вызовы - слияние данных, сохраняя накопленные значения
+                    # API вызовы
                     for api, count in saved_metrics.get('api_calls', {}).items():
                         self.metrics['api_calls'][api] = count
                     
-                    # API ошибки - слияние данных
+                    # API ошибки
                     for api, count in saved_metrics.get('api_errors', {}).items():
                         self.metrics['api_errors'][api] = count
                     
-                    # Время ответа API - слияние данных
+                    # Время ответа API
                     for api, times in saved_metrics.get('api_response_times', {}).items():
-                        if times:
-                            self.metrics['api_response_times'][api] = deque(times, maxlen=self.max_response_times)
+                        self.metrics['api_response_times'][api] = deque(times, maxlen=self.max_response_times)
                     
-                    # Счетчики - прямое присвоение из файла
+                    # Счетчики
                     self.metrics['photo_analyses'] = saved_metrics.get('photo_analyses', 0)
                     self.metrics['barcode_scans'] = saved_metrics.get('barcode_scans', 0)
-                    self.metrics['subscription_purchases'] = saved_metrics.get('subscription_purchases', 0)
                     
-                    # Уникальные пользователи
-                    if 'unique_users' in saved_metrics:
-                        # Если сохранен список, преобразуем его в множество
-                        if isinstance(saved_metrics['unique_users'], list):
-                            self.metrics['unique_users'] = set(saved_metrics['unique_users'])
+                    # Уникальные пользователи - преобразуем обратно в set
+                    if isinstance(saved_metrics.get('unique_users'), int):
+                        # Если сохранено только количество, мы не можем восстановить множество
+                        # Но мы можем отслеживать новых уникальных пользователей
+                        self.metrics['unique_users'] = set()
+                    elif isinstance(saved_metrics.get('unique_users'), list):
+                        # Если у нас есть список, преобразуем его обратно в множество
+                        self.metrics['unique_users'] = set(saved_metrics.get('unique_users', []))
                     
-                    # Команды - слияние данных
+                    # Команды
                     for cmd, count in saved_metrics.get('user_commands', {}).items():
                         self.metrics['user_commands'][cmd] = count
                     
-                    # Ошибки - слияние данных
+                    # Подписки
+                    self.metrics['subscription_purchases'] = saved_metrics.get('subscription_purchases', 0)
+                    
+                    # Ошибки
                     for error, count in saved_metrics.get('errors', {}).items():
                         self.metrics['errors'][error] = count
                     
@@ -106,24 +104,23 @@ class MetricsCollector:
                     self.metrics['start_times'] = saved_metrics.get('start_times', [])
                     self.metrics['start_times'].append(datetime.now().isoformat())
                     
-                    print(f"[DEBUG] Метрики успешно загружены и обновлены")
-                    logger.info(f"Метрики успешно загружены и обновлены")
+                logger.info(f"Метрики успешно загружены из {self.metrics_file}")
         except Exception as e:
-            print(f"[DEBUG] Ошибка при загрузке метрик: {str(e)}")
-            print(f"[DEBUG] Полный traceback: {traceback.format_exc()}")
             logger.error(f"Ошибка при загрузке метрик: {str(e)}")
-            logger.error(traceback.format_exc())
-
     
     def _start_background_save(self):
         """Запуск фонового потока для периодического сохранения метрик"""
         def save_periodically():
             while True:
-                time.sleep(self.save_interval)
-                self.save_metrics()
+                try:
+                    time.sleep(self.save_interval)
+                    self.save_metrics()
+                except Exception as e:
+                    logger.error(f"Ошибка в потоке сохранения метрик: {str(e)}")
         
         save_thread = threading.Thread(target=save_periodically, daemon=True)
         save_thread.start()
+        logger.info("Фоновый поток для сохранения метрик запущен")
     
     def track_api_call(self, api_name, response_time=None, error=False):
         """
@@ -243,9 +240,6 @@ class MetricsCollector:
         """Сохранение метрик в файл"""
         try:
             with self.lock:
-                # Подробное логирование для отладки
-                print(f"[DEBUG] Начинаем сохранение метрик в файл: {self.metrics_file}")
-                
                 # Создание копии метрик для сериализации
                 serializable_metrics = {
                     'api_calls': dict(self.metrics['api_calls']),
@@ -253,6 +247,7 @@ class MetricsCollector:
                     'api_response_times': {k: list(v) for k, v in self.metrics['api_response_times'].items()},
                     'photo_analyses': self.metrics['photo_analyses'],
                     'barcode_scans': self.metrics['barcode_scans'],
+                    # Сохраняем как список для возможности восстановления
                     'unique_users': list(self.metrics['unique_users']) if isinstance(self.metrics['unique_users'], set) else [],
                     'user_commands': dict(self.metrics['user_commands']),
                     'subscription_purchases': self.metrics['subscription_purchases'],
@@ -263,68 +258,23 @@ class MetricsCollector:
                     'save_time': datetime.now().isoformat()
                 }
                 
-                # Получаем директорию для сохранения
+                # Создание директории для метрик, если она не существует
                 directory = os.path.dirname(self.metrics_file)
-                print(f"[DEBUG] Директория для сохранения: {directory}")
-                
-                # Проверка существования директории
-                dir_exists = os.path.exists(directory)
-                print(f"[DEBUG] Директория существует: {dir_exists}")
-                
-                # Если путь относительный, делаем его абсолютным от текущей директории
-                if not os.path.isabs(directory) and directory:
-                    abs_directory = os.path.join(os.getcwd(), directory)
-                    print(f"[DEBUG] Абсолютный путь к директории: {abs_directory}")
-                    directory = abs_directory
-                
-                # Создаем директорию, если она не существует
-                if directory and not os.path.exists(directory):
-                    try:
-                        print(f"[DEBUG] Пытаемся создать директорию: {directory}")
-                        os.makedirs(directory, exist_ok=True)
-                        print(f"[DEBUG] Директория успешно создана: {directory}")
-                    except Exception as dir_error:
-                        print(f"[DEBUG] Ошибка при создании директории: {str(dir_error)}")
-                        logger.error(f"Ошибка при создании директории {directory}: {str(dir_error)}")
-                        print(f"[DEBUG] Полный traceback: {traceback.format_exc()}")
-                
-                # Проверяем запись в директорию
-                try:
-                    test_file_path = os.path.join(directory, 'test_write.tmp')
-                    print(f"[DEBUG] Тестируем запись в файл: {test_file_path}")
-                    with open(test_file_path, 'w') as f:
-                        f.write('test')
-                    os.remove(test_file_path)
-                    print(f"[DEBUG] Запись и удаление тестового файла успешны")
-                except Exception as write_error:
-                    print(f"[DEBUG] Ошибка при проверке записи: {str(write_error)}")
-                    print(f"[DEBUG] Полный traceback: {traceback.format_exc()}")
-                
-                # Печатаем полный путь к файлу для отладки
-                full_path = os.path.abspath(self.metrics_file)
-                print(f"[DEBUG] Полный путь к файлу метрик: {full_path}")
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
                 
                 # Сохранение метрик в файл
-                try:
-                    print(f"[DEBUG] Пытаемся сохранить метрики в файл: {full_path}")
-                    with open(self.metrics_file, 'w', encoding='utf-8') as f:
-                        json.dump(serializable_metrics, f, ensure_ascii=False, indent=2)
-                    print(f"[DEBUG] Метрики успешно сохранены в файл")
-                except Exception as save_error:
-                    print(f"[DEBUG] Ошибка при сохранении в файл: {str(save_error)}")
-                    print(f"[DEBUG] Полный traceback: {traceback.format_exc()}")
+                with open(self.metrics_file, 'w', encoding='utf-8') as f:
+                    json.dump(serializable_metrics, f, ensure_ascii=False, indent=2)
                 
                 logger.info(f"Метрики успешно сохранены в {self.metrics_file}")
                 self._last_save = time.time()
         except Exception as e:
-            print(f"[DEBUG] Общая ошибка в save_metrics: {str(e)}")
-            print(f"[DEBUG] Полный traceback: {traceback.format_exc()}")
             logger.error(f"Ошибка при сохранении метрик: {str(e)}")
-            logger.error(traceback.format_exc())
 
 
 # Создание глобального экземпляра коллектора метрик
 metrics_collector = MetricsCollector(
     save_interval=3600,  # Сохранять метрики каждый час
-    metrics_file='/home/dq12777/nutrition_bot/data/metrics.json'  # Абсолютный путь
+    metrics_file='data/metrics.json'
 )

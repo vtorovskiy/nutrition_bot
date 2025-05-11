@@ -555,7 +555,10 @@ class DatabaseManager:
             )
             session.add(food_analysis)
             session.commit()
-            return food_analysis
+            
+            # Возвращаем ID, а не объект
+            analysis_id = food_analysis.id
+            return analysis_id  # Возвращаем только ID
         finally:
             session.close()
     

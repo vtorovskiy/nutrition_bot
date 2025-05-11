@@ -19,6 +19,8 @@ from monitoring.decorators import track_command, track_api_call, track_user_acti
 import time
 from config import PAYMENT_PROVIDER_TOKEN, SUBSCRIPTION_COST
 import traceback
+import json
+import re
 
 
 # Настройка логирования
@@ -89,31 +91,26 @@ def start(message):
     # Приветственное сообщение
     welcome_text = (
         f"👋 Привет, {first_name or username or 'дорогой пользователь'}!\n\n"
-        f"Я твой помощник для анализа пищевой ценности блюд по фотографии или штрихкоду. "
-        f"Просто отправь мне фото еды или штрихкод продукта, и я рассчитаю её КБЖУ "
-        f"(калории, белки, жиры, углеводы).\n\n"
-        f"🔍 *Доступные команды:*\n"
-        f"/help - Показать справку\n"
-        f"/subscription - Управление подпиской\n"
-        f"/stats - Ваша статистика использования\n"
-        f"/setup - Настройка профиля и норм КБЖУ\n\n"
+        f"Я SnapEat — твой помощник для анализа КБЖУ блюд.\n"
+        f"Отправь мне фото еды или штрихкод продукта.\n\n"
     )
     
     # Добавляем информацию о подписке
     is_subscribed = DatabaseManager.check_subscription_status(user_id)
     remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
-    subscription_info = get_subscription_info(remaining_requests, is_subscribed)
     
-    welcome_text += subscription_info
+    if not is_subscribed:
+        welcome_text += f"🔸 Доступно {remaining_requests} бесплатных анализов\n"
+    else:
+        welcome_text += "✅ У вас активная подписка\n"
     
-    # Кнопки
+    # Кнопки (изменяем порядок)
     markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("Настроить профиль", callback_data="setup_profile"))
+    
     if not is_subscribed:
         markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
     
-    # Добавляем кнопку для расчета КБЖУ
-    markup.add(InlineKeyboardButton("Рассчитать норму КБЖУ", callback_data="setup_profile"))
-
     # Путь к приветственной фотографии
     welcome_image_path = os.path.join(os.path.dirname(__file__), 'static', 'start_photo.jpg')
     
@@ -200,6 +197,9 @@ def setup_command(message):
     
     # Получаем текущий профиль пользователя
     user_profile = DatabaseManager.get_user_profile(user_id)
+
+    # Путь к изображению для команды setup
+    setup_image_path = os.path.join(os.path.dirname(__file__), 'static', 'setup.jpg')
     
     if user_profile and (user_profile.get('gender') or user_profile.get('daily_calories')):
         # Если профиль уже настроен, показываем текущие данные
@@ -233,8 +233,22 @@ def setup_command(message):
             InlineKeyboardButton("Обновить данные", callback_data="setup_profile"),
             InlineKeyboardButton("Задать нормы вручную", callback_data="setup_manual_norms")
         )
+
+        try:
+            # Отправляем фото с текстом
+            with open(setup_image_path, 'rb') as photo:
+                bot.send_photo(
+                    message.chat.id, 
+                    photo, 
+                    caption=profile_text, 
+                    parse_mode="Markdown", 
+                    reply_markup=markup
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке изображения для команды setup: {str(e)}")
+            # В случае ошибки отправляем только текст
+            bot.send_message(message.chat.id, profile_text, parse_mode="Markdown", reply_markup=markup)
         
-        bot.send_message(message.chat.id, profile_text, parse_mode="Markdown", reply_markup=markup)
     else:
         # Если профиль не настроен, предлагаем настроить
         markup = InlineKeyboardMarkup(row_width=2)
@@ -253,7 +267,20 @@ def setup_command(message):
             "_Все данные хранятся только в нашей базе и используются исключительно для расчета норм._"
         )
         
-        bot.send_message(message.chat.id, setup_text, parse_mode="Markdown", reply_markup=markup)
+        try:
+            # Отправляем фото с текстом
+            with open(setup_image_path, 'rb') as photo:
+                bot.send_photo(
+                    message.chat.id, 
+                    photo, 
+                    caption=setup_text, 
+                    parse_mode="Markdown", 
+                    reply_markup=markup
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке изображения для команды setup: {str(e)}")
+            # В случае ошибки отправляем только текст
+            bot.send_message(message.chat.id, setup_text, parse_mode="Markdown", reply_markup=markup)
 
 # Обработчик для кнопок настройки профиля
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setup_"))
@@ -678,7 +705,22 @@ def help_command(message):
         "Если у вас возникли вопросы или проблемы, свяжитесь с нашей службой поддержки"
     )
     
-    bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
+    # Путь к изображению для команды help
+    help_image_path = os.path.join(os.path.dirname(__file__), 'static', 'help.jpg')
+    
+    try:
+        # Отправляем фото с текстом
+        with open(help_image_path, 'rb') as photo:
+            bot.send_photo(
+                message.chat.id, 
+                photo, 
+                caption=help_text, 
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке изображения для команды help: {str(e)}")
+        # В случае ошибки отправляем только текст
+        bot.send_message(message.chat.id, help_text, parse_mode="Markdown")
 
 # Обработчик команды /subscription
 @bot.message_handler(commands=['subscription'])
@@ -690,6 +732,9 @@ def subscription_command(message):
     # Проверка статуса подписки
     is_subscribed = DatabaseManager.check_subscription_status(user_id)
     remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+
+    # Путь к изображению для команды subscription
+    subscription_image_path = os.path.join(os.path.dirname(__file__), 'static', 'subscription.jpg')
     
     # Формирование сообщения
     if is_subscribed:
@@ -730,7 +775,20 @@ def subscription_command(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
     
-    bot.send_message(message.chat.id, subscription_text, parse_mode="Markdown", reply_markup=markup)
+    try:
+        # Отправляем фото с текстом
+        with open(subscription_image_path, 'rb') as photo:
+            bot.send_photo(
+                message.chat.id, 
+                photo, 
+                caption=subscription_text, 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке изображения для команды subscription: {str(e)}")
+        # В случае ошибки отправляем только текст
+        bot.send_message(message.chat.id, subscription_text, parse_mode="Markdown", reply_markup=markup)
 
 # Обработчик команды /stats
 @bot.message_handler(commands=['stats'])
@@ -981,10 +1039,11 @@ def specify_portion_callback(call):
     chat_id = call.message.chat.id
     
     # Сохраняем ID сообщения для обновления
-    user_data[user_id] = {
-        'message_id': call.message.message_id,
-        'last_photo_id': None
-    }
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    
+    # ВАЖНО: Сохраняем ID сообщения
+    user_data[user_id]['message_id'] = call.message.message_id
     
     # Устанавливаем состояние ожидания ввода размера порции
     bot.set_state(user_id, BotStates.waiting_for_portion_size, chat_id)
@@ -1013,13 +1072,22 @@ def subscribe_menu_callback(call):
         InlineKeyboardButton("12 месяцев (-20%)", callback_data="subscribe_12")
     )
     
-    # Обновляем сообщение с вариантами подписки
-    bot.edit_message_text(
-        "Выберите срок подписки:",
-        chat_id,
-        call.message.message_id,
-        reply_markup=markup
-    )
+    try:
+        # Пробуем отредактировать текст сообщения
+        bot.edit_message_text(
+            "Выберите срок подписки:",
+            chat_id,
+            call.message.message_id,
+            reply_markup=markup
+        )
+    except Exception as e:
+        # Если не получается отредактировать (например, это сообщение с фото),
+        # отправляем новое сообщение
+        bot.send_message(
+            chat_id,
+            "Выберите срок подписки:",
+            reply_markup=markup
+        )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("subscribe_"))
 @track_command('subscribe_payment')
@@ -1326,10 +1394,12 @@ def handle_food_name(message):
 # Обработчик для ввода размера порции
 @bot.message_handler(state=BotStates.waiting_for_portion_size)
 def handle_portion_size(message):
-    """Обработчик ввода размера порции пользователем с улучшенной обработкой ошибок"""
+    """Обработчик ввода размера порции пользователем"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     portion_text = message.text.strip()
+
+    logger.info(f"Обработка размера порции. user_id: {user_id}, user_data: {user_data.get(user_id)}")
     
     # Отменяем операцию по команде
     if portion_text.lower() in ['/cancel', 'отмена']:
@@ -1351,106 +1421,204 @@ def handle_portion_size(message):
     # Сбрасываем состояние после успешной валидации
     bot.delete_state(user_id, chat_id)
     
-    # Получаем данные пользователя
-    user_info = user_data.get(user_id)
-    if not user_info:
-        bot.send_message(chat_id, "Произошла ошибка. Пожалуйста, отправьте фото снова.")
-        return
-    
     # Отправляем сообщение о начале обработки
     processing_message = bot.send_message(chat_id, "🔍 Пересчитываю КБЖУ для указанного веса порции...")
     
     try:
-        # Получаем последнюю запись пользователя
-        session = Session()
-        try:
-            user = session.query(User).filter_by(telegram_id=user_id).first()
-            if user:
-                food_analysis = session.query(FoodAnalysis).filter_by(
-                    user_id=user.id
-                ).order_by(FoodAnalysis.analysis_date.desc()).first()
+        # Проверяем, есть ли данные о продукте в user_data
+        if user_id in user_data and 'food_data' in user_data[user_id]:
+            # Получаем данные о продукте из user_data
+            food_data = user_data[user_id]['food_data']
+
+            if user_id in user_data and 'food_data' in user_data[user_id]:
+                logger.info(f"Найдены данные food_data: {user_data[user_id]['food_data']}")
+            else:
+                logger.info(f"Данные food_data не найдены. Пробуем получить из message_id")
+
+            
+            # Получаем текущие значения КБЖУ
+            old_portion = food_data.get('portion_weight', 100)
+            
+            # Рассчитываем коэффициент для пересчета
+            ratio = portion_size / old_portion
+            
+            # Пересчитываем и округляем значения
+            new_calories = round(food_data['calories'] * ratio, 1)
+            new_proteins = round(food_data['proteins'] * ratio, 1)
+            new_fats = round(food_data['fats'] * ratio, 1)
+            new_carbs = round(food_data['carbs'] * ratio, 1)
+            
+            # Обновляем данные в user_data
+            food_data['calories'] = new_calories
+            food_data['proteins'] = new_proteins
+            food_data['fats'] = new_fats
+            food_data['carbs'] = new_carbs
+            food_data['portion_weight'] = portion_size
+            
+            # Формируем данные для отправки пользователю
+            nutrition_data = {
+                'name': food_data['name'],
+                'calories': new_calories,
+                'proteins': new_proteins,
+                'fats': new_fats,
+                'carbs': new_carbs,
+                'portion_weight': portion_size,
+                'estimated': food_data.get('estimated', False)
+            }
+            
+            # Проверка статуса подписки
+            is_subscribed = DatabaseManager.check_subscription_status(user_id)
+            remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+            
+            # Форматирование результата
+            result_text = format_nutrition_result(nutrition_data, user_id)
+            
+            if not is_subscribed:
+                result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
+            
+            # Кнопки
+            markup = InlineKeyboardMarkup(row_width=1)
+
+            # Создаем уникальный ключ для текущего анализа
+            analysis_key = f"{processing_message.message_id}"
+
+            # Добавляем кнопку для добавления в статистику если еще не добавлено
+            if not user_data[user_id].get(f'added_to_stats_{analysis_key}', False):
+                markup.add(InlineKeyboardButton("➕ Добавить в статистику", callback_data=f"add_stats_{user_id}"))
+            else:
+                result_text += "\n\n✅ Блюдо добавлено в статистику"
+
+            # Добавляем кнопку для подписки, если пользователь не подписан
+            if not is_subscribed:
+                markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+            
+            # Отправляем обновленные результаты
+            bot.edit_message_text(
+                result_text,
+                chat_id,
+                processing_message.message_id,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+            return
+        
+        # ЗАПАСНОЙ ВАРИАНТ - Если данных в user_data нет, получаем их из текста сообщения
+        # Получаем ID сообщения с результатами из user_data
+        message_id = user_data.get(user_id, {}).get('message_id')
+        
+        if message_id:
+            try:
+                # Получаем сообщение с результатами
+                food_message = bot.get_message(chat_id, message_id)
+                message_text = food_message.text
                 
-                if food_analysis:
-                    # Получаем текущие значения КБЖУ
-                    old_portion = food_analysis.portion_weight or 100
-                    
-                    # Рассчитываем коэффициент для пересчета
-                    ratio = portion_size / old_portion
-                    
-                    # Округляем значения до 1 десятичного знака
-                    new_calories = round(food_analysis.calories * ratio, 1)
-                    new_proteins = round(food_analysis.proteins * ratio, 1)
-                    new_fats = round(food_analysis.fats * ratio, 1)
-                    new_carbs = round(food_analysis.carbs * ratio, 1)
-                    
-                    # Обновляем значения в базе данных
-                    food_analysis.portion_weight = portion_size
-                    food_analysis.calories = new_calories
-                    food_analysis.proteins = new_proteins
-                    food_analysis.fats = new_fats
-                    food_analysis.carbs = new_carbs
-                    session.commit()
-                    
-                    # Формируем новые данные для отправки пользователю
-                    nutrition_data = {
-                        'name': food_analysis.food_name,
-                        'calories': new_calories,
-                        'proteins': new_proteins,
-                        'fats': new_fats,
-                        'carbs': new_carbs,
-                        'estimated': False,
-                        'portion_weight': portion_size
-                    }
-                    
-                    # Проверка статуса подписки
-                    is_subscribed = DatabaseManager.check_subscription_status(user_id)
-                    remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
-                    
-                    # Форматирование результата
-                    result_text = format_nutrition_result(nutrition_data, user_id)
-                    
-                    if not is_subscribed:
-                        result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
-                    
-                    # Кнопки
-                    markup = None
-                    if not is_subscribed:
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
-                    
-                    # Отправляем обновленные результаты
-                    bot.edit_message_text(
-                        result_text,
-                        chat_id,
-                        processing_message.message_id,
-                        parse_mode="Markdown",
-                        reply_markup=markup
-                    )
+                # Извлекаем название блюда
+                name_match = re.search(r'🍽️\s*(.+?)(?:\s*\(|$)', message_text)
+                food_name = name_match.group(1).strip() if name_match else "Неизвестное блюдо"
+                
+                # Извлекаем калории
+                calories_match = re.search(r'Калории:\s*(\d+\.?\d*)', message_text)
+                current_calories = float(calories_match.group(1)) if calories_match else 0
+                
+                # Извлекаем БЖУ
+                pfc_match = re.search(r'Б/Ж/У:\s*(\d+\.?\d*)\s*г\s*\|\s*(\d+\.?\d*)\s*г\s*\|\s*(\d+\.?\d*)', message_text)
+                if pfc_match:
+                    current_proteins = float(pfc_match.group(1))
+                    current_fats = float(pfc_match.group(2))
+                    current_carbs = float(pfc_match.group(3))
                 else:
-                    bot.edit_message_text(
-                        "Не найдены данные о последнем анализе. Пожалуйста, отправьте фото еды снова.",
-                        chat_id,
-                        processing_message.message_id
-                    )
-        finally:
-            session.close()
+                    current_proteins = 0
+                    current_fats = 0
+                    current_carbs = 0
+                
+                # Извлекаем текущий вес порции, если есть
+                weight_match = re.search(r'\((\d+\.?\d*)\s*г\)', message_text)
+                current_portion = float(weight_match.group(1)) if weight_match else 100
+                
+                # Рассчитываем новые значения
+                ratio = portion_size / current_portion
+                new_calories = round(current_calories * ratio, 1)
+                new_proteins = round(current_proteins * ratio, 1)
+                new_fats = round(current_fats * ratio, 1)
+                new_carbs = round(current_carbs * ratio, 1)
+                
+                # Создаем данные о еде и сохраняем в user_data
+                food_data = {
+                    'name': food_name,
+                    'calories': new_calories,
+                    'proteins': new_proteins,
+                    'fats': new_fats,
+                    'carbs': new_carbs,
+                    'portion_weight': portion_size,
+                    'estimated': False
+                }
+                
+                # Сохраняем данные в user_data
+                if user_id not in user_data:
+                    user_data[user_id] = {}
+                
+                user_data[user_id]['food_data'] = food_data
+                
+                # Проверка статуса подписки
+                is_subscribed = DatabaseManager.check_subscription_status(user_id)
+                remaining_requests = DatabaseManager.get_remaining_free_requests(user_id)
+                
+                # Форматирование результата
+                result_text = format_nutrition_result(food_data, user_id)
+                
+                if not is_subscribed:
+                    result_text += f"\n\n{get_subscription_info(remaining_requests, is_subscribed)}"
+                
+                # Кнопки
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("➕ Добавить в статистику", callback_data=f"add_stats_{user_id}"))
+                
+                if not is_subscribed:
+                    markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
+                
+                # Отправляем обновленные результаты
+                bot.edit_message_text(
+                    result_text,
+                    chat_id,
+                    processing_message.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+                return
+            except Exception as msg_error:
+                logger.error(f"Ошибка при извлечении данных из сообщения: {str(msg_error)}")
+                logger.error(traceback.format_exc())
+        
+        # Если ничего не нашли
+        bot.edit_message_text(
+            "Не удалось найти данные о продукте. Пожалуйста, отправьте фото еды снова.",
+            chat_id,
+            processing_message.message_id
+        )
     
     except Exception as e:
         logger.error(f"Ошибка при пересчете для нового размера порции: {str(e)}")
+        logger.error(traceback.format_exc())
         bot.edit_message_text(
             "❌ Произошла ошибка при пересчете КБЖУ. Пожалуйста, попробуйте еще раз позже.",
             chat_id,
             processing_message.message_id
         )
-    
-    # Удаляем данные пользователя
-    if user_id in user_data:
-        del user_data[user_id]
 
 @bot.message_handler(content_types=['photo'])
 def photo_handler(message):
-    """Обработчик фотографий с использованием AITunnel для точного определения продуктов"""
+    """Обработчик фотографий с кнопкой добавления в статистику"""
     user_id = message.from_user.id
+    
+    # При каждой новой фотографии сбрасываем данные о текущей еде и флаги "добавлено в статистику"
+    if user_id in user_data:
+        # Сохраняем только важные данные пользователя, если есть
+        temp_data = {}
+        for key in user_data[user_id]:
+            # Сохраняем все, кроме food_data и added_to_stats_*
+            if key != 'food_data' and not key.startswith('added_to_stats_'):
+                temp_data[key] = user_data[user_id][key]
+        user_data[user_id] = temp_data
     
     # Проверка статуса подписки
     try:
@@ -1541,8 +1709,27 @@ def photo_handler(message):
                 # Добавляем информацию о штрихкоде к результату
                 result_text = f"🔍 Штрихкод: *{nutrition_data.get('barcode')}*\n" + result_text
                 
-                # Создаем клавиатуру для уточнения веса
+                # Создаем клавиатуру
                 markup = InlineKeyboardMarkup(row_width=1)
+                
+                # Сохраняем данные для добавления в статистику без добавления в БД
+                food_data = {
+                    'name': nutrition_data['name'],
+                    'calories': nutrition_data['calories'],
+                    'proteins': nutrition_data['proteins'],
+                    'fats': nutrition_data['fats'],
+                    'carbs': nutrition_data['carbs'],
+                    'portion_weight': nutrition_data.get('portion_weight', 100),
+                    'photo_path': None  # Для штрихкодов не сохраняем фото
+                }
+                
+                # Сохраняем данные в user_data для использования в callback
+                user_data[user_id] = {'food_data': food_data}
+                
+                # Добавляем кнопку для добавления в статистику первой
+                markup.add(InlineKeyboardButton("➕ Добавить в статистику", callback_data=f"add_stats_{user_id}"))
+                
+                # Добавляем остальные кнопки
                 markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
                 
                 # Добавляем кнопку для подписки, если пользователь не подписан
@@ -1550,24 +1737,6 @@ def photo_handler(message):
                     remaining_requests -= 1
                     result_text += f"\n🔄 Осталось запросов: {remaining_requests}\n"
                     markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
-                
-                # Сохранение результатов анализа
-                try:
-                    analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
-                    DatabaseManager.save_food_analysis(
-                        user_id,
-                        nutrition_data['name'],
-                        nutrition_data['calories'],
-                        nutrition_data['proteins'],
-                        nutrition_data['fats'],
-                        nutrition_data['carbs'],
-                        None,  # Не сохраняем фото для штрихкодов
-                        nutrition_data.get('portion_weight', 100),
-                        analysis_time
-                    )
-                except Exception as db_error:
-                    logger.error(f"Ошибка при сохранении данных: {str(db_error)}")
-                    # Продолжаем выполнение, так как это некритичная ошибка
                 
                 # Отправка результатов пользователю
                 bot.edit_message_text(
@@ -1599,19 +1768,37 @@ def photo_handler(message):
 
         metrics_collector.track_photo_analysis(user_id)
         
-        # Форматирование результатов (ингредиенты уже включены в результат)
+        # Форматирование результатов
         result_text = format_nutrition_result(nutrition_data, user_id)
-        
-        # Создаем клавиатуру для уточнения, если результаты неточные
+
+        # Создаем клавиатуру
         markup = InlineKeyboardMarkup(row_width=1)
-        
+
+        # Сохраняем данные для добавления в статистику
+        if user_id not in user_data:
+            user_data[user_id] = {}
+
+        user_data[user_id]['food_data'] = {
+            'name': nutrition_data['name'],
+            'calories': nutrition_data['calories'],
+            'proteins': nutrition_data['proteins'],
+            'fats': nutrition_data['fats'],
+            'carbs': nutrition_data['carbs'],
+            'portion_weight': nutrition_data.get('portion_weight', 100),
+            'photo_path': photo_path,
+            'estimated': nutrition_data.get('estimated', False)
+        }
+
+        # Добавляем кнопку для добавления в статистику первой
+        markup.add(InlineKeyboardButton("➕ Добавить в статистику", callback_data=f"add_stats_{user_id}"))
+
         if nutrition_data.get('estimated', False):
             # Для неточных результатов предлагаем уточнить
             markup.add(InlineKeyboardButton("Уточнить название блюда", callback_data="specify_food"))
-        
+
         # Добавляем кнопку для указания веса порции
         markup.add(InlineKeyboardButton("Указать вес порции", callback_data="specify_portion"))
-        
+
         # Добавляем кнопку для подписки, если пользователь не подписан
         if not is_subscribed:
             remaining_requests -= 1
@@ -1619,25 +1806,7 @@ def photo_handler(message):
             markup.add(InlineKeyboardButton("Оформить подписку", callback_data="subscribe"))
         else:
             result_text += "\n✅ Активная подписка\n"
-        
-        # Сохранение результатов анализа
-        try:
-            analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
-            DatabaseManager.save_food_analysis(
-                user_id,
-                nutrition_data['name'],
-                nutrition_data['calories'],
-                nutrition_data['proteins'],
-                nutrition_data['fats'],
-                nutrition_data['carbs'],
-                photo_path,
-                nutrition_data.get('portion_weight', None),
-                analysis_time
-            )
-        except Exception as db_error:
-            logger.error(f"Ошибка при сохранении данных: {str(db_error)}")
-            # Продолжаем выполнение, так как это некритичная ошибка
-        
+
         # Отправка результатов пользователю
         bot.edit_message_text(
             result_text,
@@ -1655,12 +1824,94 @@ def photo_handler(message):
             processing_message.message_id
         )
     finally:
-        # Удаление временного файла, если он существует
-        if photo_path and os.path.exists(photo_path):
-            try:
-                os.remove(photo_path)
-            except Exception as cleanup_error:
-                logger.error(f"Ошибка при удалении временного файла: {str(cleanup_error)}")
+        # Мы не удаляем временный файл, так как он может понадобиться для сохранения в БД
+        pass
+
+# Обработчик кнопки добавления в статистику
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_stats_"))
+def add_stats_callback(call):
+    """Обработчик кнопки добавления в статистику"""
+    try:
+        user_id = int(call.data.split("_")[2])  # Извлекаем user_id из callback_data
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Проверяем, есть ли данные для сохранения
+        if user_id not in user_data or 'food_data' not in user_data[user_id]:
+            bot.answer_callback_query(call.id, "Ошибка: данные не найдены. Попробуйте снова отправить фото.")
+            return
+        
+        # Создаем уникальный ключ для текущего анализа - сочетание message_id и user_id
+        analysis_key = f"{message_id}"
+        
+        # Если этот конкретный анализ уже был добавлен в статистику, сообщаем об этом
+        if user_data[user_id].get(f'added_to_stats_{analysis_key}', False):
+            bot.answer_callback_query(call.id, "Этот анализ уже добавлен в статистику!")
+            return
+            
+        # Получаем данные блюда
+        food_data = user_data[user_id]['food_data']
+        
+        # Сохраняем в базу данных
+        analysis_time = datetime.utcnow() + timedelta(hours=TIMEZONE_OFFSET)
+        analysis_id = DatabaseManager.save_food_analysis(
+            user_id,
+            food_data['name'],
+            food_data['calories'],
+            food_data['proteins'],
+            food_data['fats'],
+            food_data['carbs'],
+            food_data.get('photo_path'),
+            food_data.get('portion_weight', 100),
+            analysis_time
+        )
+        
+        # Сохраняем ID анализа и помечаем как добавленный в статистику ТОЛЬКО для текущего анализа
+        if analysis_id:
+            user_data[user_id]['analysis_id'] = analysis_id
+            user_data[user_id][f'added_to_stats_{analysis_key}'] = True
+            
+            # Отвечаем пользователю
+            bot.answer_callback_query(call.id, "✅ Блюдо успешно добавлено в статистику!")
+            
+            # Обновляем сообщение, убирая кнопку "Добавить в статистику"
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            # Получаем оригинальную разметку
+            original_markup = call.message.reply_markup.to_dict() if call.message.reply_markup else {"inline_keyboard": []}
+            
+            # Оставляем все кнопки, кроме "Добавить в статистику"
+            for row in original_markup.get("inline_keyboard", []):
+                for button in row:
+                    if "Добавить в статистику" not in button.get("text", ""):
+                        markup.add(types.InlineKeyboardButton(
+                            text=button.get("text", ""),
+                            callback_data=button.get("callback_data", "")
+                        ))
+            
+            # Получаем оригинальный текст и добавляем сообщение о добавлении в статистику
+            original_text = call.message.text
+            
+            if "Блюдо добавлено в статистику" not in original_text:
+                updated_text = original_text + "\n\n✅ Блюдо добавлено в статистику"
+            else:
+                updated_text = original_text
+            
+            # Обновляем сообщение
+            bot.edit_message_text(
+                updated_text,
+                chat_id,
+                call.message.message_id,
+                parse_mode="Markdown",
+                reply_markup=markup if len(markup.keyboard) > 0 else None
+            )
+        else:
+            bot.answer_callback_query(call.id, "Ошибка при добавлении в статистику.")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении в статистику: {str(e)}")
+        logger.error(traceback.format_exc())
+        bot.answer_callback_query(call.id, "Произошла ошибка при добавлении в статистику.")
 
 # Обработчик текстовых сообщений
 @bot.message_handler(func=lambda message: True)
