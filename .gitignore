@@ -8,4 +8,4 @@
 /create_test_subscription.py
 data/barcodes.json
 /static
-/food_recognition\__pycache__
+food_recognition\__pycache__/
