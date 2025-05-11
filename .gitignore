@@ -7,4 +7,4 @@
 /README.md
 /create_test_subscription.py
 data/barcodes.json
-/static
+static/
