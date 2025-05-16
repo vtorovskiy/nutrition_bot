@@ -27,6 +27,10 @@ FREE_REQUESTS_LIMIT = 10
 # Настройки базы данных
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///nutrition_bot.db')
 
+# Режим работы бота (polling или webhook)
+BOT_MODE = os.getenv('BOT_MODE', 'polling').lower()
+IS_WEBHOOK_MODE = BOT_MODE == 'webhook'
+
 # Webhook и URL сервера (для продакшена)
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
@@ -36,3 +40,21 @@ WEBHOOK_LISTEN = os.getenv('WEBHOOK_LISTEN', '0.0.0.0')
 # Путь к SSL-сертификатам (для продакшена)
 WEBHOOK_SSL_CERT = os.getenv('WEBHOOK_SSL_CERT')
 WEBHOOK_SSL_PRIV = os.getenv('WEBHOOK_SSL_PRIV')
+
+# Настройки логирования
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+LOG_FILE = os.getenv('LOG_FILE', 'logs/bot.log')
+
+# Директория для резервного копирования
+BACKUP_DIR = os.getenv('BACKUP_DIR', 'backups')
+
+# ID администраторов через запятую в .env
+ADMIN_IDS_STR = os.getenv('ADMIN_IDS', '931190875')
+ADMIN_IDS = [int(admin_id.strip()) for admin_id in ADMIN_IDS_STR.split(',') if admin_id.strip()]
+
+# Создание необходимых директорий
+log_dir = os.path.dirname(LOG_FILE)
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
+if not os.path.exists(BACKUP_DIR):
+    os.makedirs(BACKUP_DIR, exist_ok=True)
